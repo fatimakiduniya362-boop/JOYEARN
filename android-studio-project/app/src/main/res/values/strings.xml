@@ -1,0 +1,7 @@
+<resources>
+    <string name="app_name">JoyEarn</string>
+    <string name="app_full_name">JoyEarn: Global Rewards &amp; Learning</string>
+    <string name="asset_statements" translatable="false">
+        [{\n          \"relation\": [\"delegate_permission/common.handle_all_urls\"],\n          \"target\": {\n            \"namespace\": \"web\",\n            \"site\": \"https://ais-pre-yu4imjtkrbbrtd3hcg63dd-498458785197.asia-east1.run.app\"\n          }\n        }]
+    </string>
+</resources>

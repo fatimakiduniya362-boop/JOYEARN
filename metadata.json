@@ -1,0 +1,6 @@
+{
+  "name": "JoyEarn - Family Friendly Rewards & Learning",
+  "description": "A colorful, safe, family-friendly mobile platform combining legitimate rewards, safe entertainment, education, mini-games, and offline videos.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

@@ -1,0 +1,53 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#f43f5e" />
+      <stop offset="50%" stop-color="#fb7185" />
+      <stop offset="100%" stop-color="#e11d48" />
+    </linearGradient>
+    <linearGradient id="gold" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#fde047" />
+      <stop offset="100%" stop-color="#eab308" />
+    </linearGradient>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="12" stdDeviation="16" flood-opacity="0.3" flood-color="#000" />
+    </filter>
+  </defs>
+  
+  <!-- App Background Squircle for Android -->
+  <rect width="512" height="512" rx="128" fill="url(#bg)" />
+  
+  <!-- Subtle decorative circular rings -->
+  <circle cx="256" cy="256" r="180" fill="none" stroke="#ffffff" stroke-opacity="0.15" stroke-width="6" />
+  <circle cx="256" cy="256" r="220" fill="none" stroke="#ffffff" stroke-opacity="0.1" stroke-width="4" stroke-dasharray="12 12" />
+
+  <!-- Joy Mascot Face & Star Icon inside Safe Zone (central 80%) -->
+  <g filter="url(#shadow)">
+    <!-- Mascot Bunny / Bear Silhouette -->
+    <!-- Ears -->
+    <ellipse cx="190" cy="170" rx="34" ry="60" fill="#ffffff" />
+    <ellipse cx="190" cy="170" rx="18" ry="38" fill="#fda4af" />
+    
+    <ellipse cx="322" cy="170" rx="34" ry="60" fill="#ffffff" />
+    <ellipse cx="322" cy="170" rx="18" ry="38" fill="#fda4af" />
+
+    <!-- Head -->
+    <circle cx="256" cy="270" r="105" fill="#ffffff" />
+
+    <!-- Happy Eyes -->
+    <path d="M 205 260 Q 220 245 235 260" stroke="#881337" stroke-width="8" stroke-linecap="round" fill="none" />
+    <path d="M 277 260 Q 292 245 307 260" stroke="#881337" stroke-width="8" stroke-linecap="round" fill="none" />
+
+    <!-- Cute Cheeks -->
+    <circle cx="195" cy="285" r="14" fill="#f43f5e" opacity="0.3" />
+    <circle cx="317" cy="285" r="14" fill="#f43f5e" opacity="0.3" />
+
+    <!-- Cute Nose & Mouth -->
+    <polygon points="256,275 248,284 264,284" fill="#e11d48" />
+    <path d="M 256 284 Q 256 298 245 300 M 256 284 Q 256 298 267 300" stroke="#881337" stroke-width="5" stroke-linecap="round" fill="none" />
+
+    <!-- Golden Coin Badge -->
+    <circle cx="340" cy="350" r="48" fill="url(#gold)" stroke="#ffffff" stroke-width="6" />
+    <text x="340" y="366" font-size="44" font-weight="900" font-family="sans-serif" fill="#78350f" text-anchor="middle">₨</text>
+  </g>
+</svg>

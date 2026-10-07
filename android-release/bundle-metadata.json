@@ -1,0 +1,16 @@
+{
+  "packageId": "com.joyearn.rewards.learning",
+  "versionName": "1.2.0",
+  "versionCode": 2,
+  "targetSdkVersion": 34,
+  "minSdkVersion": 21,
+  "obfuscation": "ProGuard/R8",
+  "builtWith": "Vite + Bubblewrap TWA",
+  "buildDate": "2026-09-30T10:34:43.858Z",
+  "distribution": "Google Play Console",
+  "compliance": {
+    "deceptiveBehaviorPolicy": "Compliant - Non-monetary disclaimer active",
+    "familiesPolicy": "Compliant - Kid-safe content rated PEGI 3 / Everyone",
+    "financialFeatures": "None - In-app JoyPoints only"
+  }
+}

@@ -1,0 +1,13 @@
+[
+  {
+    "relation": ["delegate_permission/common.handle_all_urls"],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "com.joyearn.rewards.learning",
+      "sha256_cert_fingerprints": [
+        "14:6D:E9:7F:02:4F:CE:CE:2E:EE:E7:E8:C2:6F:46:11:0B:E5:9C:A3:1E:6B:50:91:BC:2B:14:13:56:4C:E6:C3",
+        "E5:2A:44:B6:8C:1C:18:7C:1E:58:63:F1:C9:F9:6B:4C:4A:23:4E:91:07:22:98:23:45:C7:E9:80:C1:43:99:A2"
+      ]
+    }
+  }
+]
