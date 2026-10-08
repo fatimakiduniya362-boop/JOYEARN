@@ -16,7 +16,6 @@ import {
 } from 'lucide-react';
 import {
   MIN_ACTIVE_DAYS,
-  setMinActiveDays,
   REWARDS_DISCLAIMER_NOTICE,
   DAILY_TASKS_GOAL_LINE,
   MONTHLY_PRIZE_POOL_POINTS,
@@ -51,15 +50,7 @@ export const DailyTasksCard: React.FC<DailyTasksCardProps> = ({
   onCheckInCompleted,
 }) => {
   const [showCalendar, setShowCalendar] = useState(false);
-  const [minDays, setMinDays] = useState<number>(MIN_ACTIVE_DAYS);
   const { light, success } = useHaptics();
-
-  const handleAdjustMinDays = (delta: number) => {
-    soundService.playClick();
-    light();
-    const updated = setMinActiveDays(minDays + delta);
-    setMinDays(updated);
-  };
 
   const now = new Date();
   const todayDateStr = now.toISOString().slice(0, 10); // YYYY-MM-DD
@@ -134,7 +125,7 @@ export const DailyTasksCard: React.FC<DailyTasksCardProps> = ({
 
   // Monthly Pool Calculations
   const qualifyingDaysCount = qualifyingDates.length;
-  const isEligibleForMonthlyPayout = qualifyingDaysCount >= minDays;
+  const isEligibleForMonthlyPayout = qualifyingDaysCount >= MIN_ACTIVE_DAYS;
   const userPoolSharePoints = totalCommunityPoints > 0
     ? Math.round((qualifyingPoints / totalCommunityPoints) * MONTHLY_PRIZE_POOL_POINTS)
     : 0;
@@ -282,8 +273,8 @@ export const DailyTasksCard: React.FC<DailyTasksCardProps> = ({
               <Calendar className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
               <span>
                 {seniorMode
-                  ? `ماہانہ کیلنڈر اور پرائز پول (${qualifyingDaysCount}/${minDays} دن) • سٹریک: ${streakDays} دن`
-                  : `Monthly Calendar & Prize Pool (${qualifyingDaysCount}/${minDays} Active Days) • Streak: ${streakDays}d`}
+                  ? `ماہانہ کیلنڈر اور پرائز پول (${qualifyingDaysCount}/${MIN_ACTIVE_DAYS} دن) • سٹریک: ${streakDays} دن`
+                  : `Monthly Calendar & Prize Pool (${qualifyingDaysCount}/${MIN_ACTIVE_DAYS} Active Days) • Streak: ${streakDays}d`}
               </span>
             </div>
             {showCalendar ? (
@@ -313,26 +304,10 @@ export const DailyTasksCard: React.FC<DailyTasksCardProps> = ({
                 </div>
 
                 <div className="flex items-center gap-2">
-                  {/* Editable MIN_ACTIVE_DAYS Stepper */}
-                  <div className="flex items-center gap-1 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-2 py-0.5 shadow-2xs text-[10px]">
-                    <span className="text-slate-500 dark:text-slate-400 font-bold" title="Editable MIN_ACTIVE_DAYS threshold">Min Days:</span>
-                    <button
-                      type="button"
-                      onClick={() => handleAdjustMinDays(-1)}
-                      className="w-4 h-4 rounded bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 text-slate-700 dark:text-slate-200 font-black flex items-center justify-center leading-none"
-                      title="Decrease MIN_ACTIVE_DAYS"
-                    >
-                      -
-                    </button>
-                    <span className="font-black text-indigo-600 dark:text-indigo-400 px-0.5">{minDays}</span>
-                    <button
-                      type="button"
-                      onClick={() => handleAdjustMinDays(1)}
-                      className="w-4 h-4 rounded bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 text-slate-700 dark:text-slate-200 font-black flex items-center justify-center leading-none"
-                      title="Increase MIN_ACTIVE_DAYS"
-                    >
-                      +
-                    </button>
+                  {/* Fixed MIN_ACTIVE_DAYS Badge */}
+                  <div className="flex items-center gap-1.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-2.5 py-1 shadow-2xs text-[10px]">
+                    <span className="text-slate-500 dark:text-slate-400 font-bold">Requirement:</span>
+                    <span className="font-black text-indigo-600 dark:text-indigo-400">{MIN_ACTIVE_DAYS} Days</span>
                   </div>
 
                   <span
@@ -344,7 +319,7 @@ export const DailyTasksCard: React.FC<DailyTasksCardProps> = ({
                   >
                     {isEligibleForMonthlyPayout
                       ? 'Eligible for Payout ✅'
-                      : `Need ${Math.max(0, minDays - qualifyingDaysCount)} more days`}
+                      : `Need ${Math.max(0, MIN_ACTIVE_DAYS - qualifyingDaysCount)} more days`}
                   </span>
                 </div>
               </div>
@@ -421,7 +396,7 @@ export const DailyTasksCard: React.FC<DailyTasksCardProps> = ({
                 </div>
 
                 <div className="text-[10px] bg-slate-50 dark:bg-slate-800 p-2 rounded-lg text-slate-500 leading-relaxed font-medium">
-                  <strong>Calculation Formula:</strong> (Your Points from 100% Completed Days ÷ All Users’ Qualifying Points) × Monthly Ad-Funded Pool. Minimum {minDays} active 100% days required.
+                  <strong>Calculation Formula:</strong> (Your Points from 100% Completed Days ÷ All Users’ Qualifying Points) × Monthly Ad-Funded Pool. Minimum {MIN_ACTIVE_DAYS} active 100% days required.
                 </div>
               </div>
             </div>

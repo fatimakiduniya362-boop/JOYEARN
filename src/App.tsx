@@ -76,6 +76,9 @@ import { PersonalDashboardModal } from './components/PersonalDashboardModal';
 import { StreakLeaderboardModal } from './components/StreakLeaderboardModal';
 import { AdminWithdrawalModal, ADMIN_EMAIL } from './components/AdminWithdrawalModal';
 import { RotatingSponsorAdCard } from './components/SponsorAdCard';
+import { DailyGoalsWidget } from './components/DailyGoalsWidget';
+import { DailyGoalsCalendarModal } from './components/DailyGoalsCalendarModal';
+import { SponsorAdvertiseModal } from './components/SponsorAdvertiseModal';
 import { syncUserDataToCloud, loadUserDataFromCloud, deleteUserDataFromFirestore, recordTaskCompletionInFirestore } from './services/firestoreService';
 import { LiveStreamModal } from './components/LiveStreamModal';
 import { CommunityChatModal } from './components/CommunityChatModal';
@@ -389,7 +392,11 @@ export default function App() {
     | 'shop'
     | 'agency'
     | 'vlogs'
+    | 'dailyGoalsCalendar'
   >(null);
+
+  const [showDailyGoalsCalendarModal, setShowDailyGoalsCalendarModal] = useState(false);
+  const [showAdvertiseModal, setShowAdvertiseModal] = useState(false);
 
   // Immersive Sticky Mode hook
   const { isImmersive, isTemporarilyRevealed, toggleImmersive, revealTemporarily } = useImmersiveMode();
@@ -1243,9 +1250,51 @@ export default function App() {
           }}
         />
 
+        {/* DAILY GOALS WIDGET: Sits below Daily Tasks card, summarizes progress towards 5-activity daily threshold with clean horizontal progress bar and Rewards Ready indicator */}
+        <DailyGoalsWidget
+          completedActivitiesCount={dailyGoalCount}
+          streakDays={streakDays}
+          seniorMode={effectiveUrdu}
+          onOpenCalendarModal={() => setShowDailyGoalsCalendarModal(true)}
+          onRewardsReadyClick={() => {
+            setActiveModal('chest');
+            soundService.playDailyGoalCheer();
+          }}
+        />
+
         {/* DIRECT SPONSOR ADS ON HOME (Clearly labelled "Sponsored", rotating, zero points) */}
-        <section className="px-4 py-1">
+        <section className="px-4 py-1 space-y-1.5">
           <RotatingSponsorAdCard variant="card" />
+
+          {/* Advertise with us Card at bottom of sponsored section */}
+          <div
+            onClick={() => {
+              soundService.playClick();
+              setShowAdvertiseModal(true);
+            }}
+            className="p-2.5 bg-gradient-to-r from-amber-50 to-orange-50 dark:from-slate-850 dark:to-slate-900 border border-amber-300 dark:border-amber-700/60 rounded-2xl flex items-center justify-between gap-2 cursor-pointer hover:border-amber-400 transition-all shadow-2xs tap-bounce"
+          >
+            <div className="flex items-center gap-2.5 min-w-0">
+              <div className="w-8 h-8 rounded-xl bg-amber-500/20 text-amber-700 dark:text-amber-400 flex items-center justify-center text-sm shrink-0">
+                📢
+              </div>
+              <div className="min-w-0">
+                <span className="font-black text-xs text-slate-900 dark:text-white block truncate">
+                  {effectiveUrdu ? 'ہمارے ساتھ تشہیر کریں' : 'Advertise with us'}
+                </span>
+                <p className="text-[10px] text-slate-500 dark:text-slate-400 truncate">
+                  {effectiveUrdu ? 'اپنی ایپ یا کاروبار کی تشہیر کریں' : 'Promote your app or business to active learners'}
+                </p>
+              </div>
+            </div>
+            <button
+              type="button"
+              className="shrink-0 px-2.5 py-1 bg-amber-500 hover:bg-amber-600 text-slate-950 font-black text-[10.5px] rounded-xl shadow-2xs flex items-center gap-1"
+            >
+              <span>{effectiveUrdu ? 'معلومات' : 'Enquire'}</span>
+              <ChevronRight className="w-3 h-3" />
+            </button>
+          </div>
         </section>
 
         {/* USER GREETING & FRIENDLY MASCOT BANNER */}
@@ -2099,6 +2148,7 @@ export default function App() {
             onLogout={handleLogout}
             onDeleteAccount={handleDeleteAccount}
             onOpenAdmin={() => setShowAdminModal(true)}
+            onOpenAdvertiseModal={() => setShowAdvertiseModal(true)}
           />
         )}
 
@@ -2212,6 +2262,18 @@ export default function App() {
         seniorMode={effectiveUrdu}
       />
 
+      {/* 7-Day Daily Goals Calendar View Modal */}
+      <DailyGoalsCalendarModal
+        isOpen={showDailyGoalsCalendarModal || activeModal === 'dailyGoalsCalendar'}
+        onClose={() => {
+          setShowDailyGoalsCalendarModal(false);
+          if (activeModal === 'dailyGoalsCalendar') setActiveModal(null);
+        }}
+        streakDays={streakDays}
+        todayActivitiesCount={dailyGoalCount}
+        seniorMode={effectiveUrdu}
+      />
+
       {/* Hidden Admin Withdrawal Portal (Opened only by ADMIN_EMAIL) */}
       <AdminWithdrawalModal
         isOpen={showAdminModal}
@@ -2222,6 +2284,14 @@ export default function App() {
 
       {/* First-Time Tutorial Coach-Mark Tooltip Overlay */}
       <FirstTimeTutorialOverlay
+        seniorMode={effectiveUrdu}
+      />
+
+      {/* Sponsor Advertise With Us Modal */}
+      <SponsorAdvertiseModal
+        isOpen={showAdvertiseModal}
+        onClose={() => setShowAdvertiseModal(false)}
+        currentUser={currentUser}
         seniorMode={effectiveUrdu}
       />
 

@@ -20,9 +20,14 @@ import {
   ExternalLink,
   Save,
   Eye,
-  MousePointer
+  MousePointer,
+  Mail,
+  Phone,
+  Inbox,
+  Building,
+  Globe
 } from 'lucide-react';
-import { WithdrawalRequest, SponsorAd } from '../types';
+import { WithdrawalRequest, SponsorAd, SponsorEnquiry } from '../types';
 import {
   loadAllWithdrawalsForAdmin,
   updateWithdrawalStatus
@@ -31,7 +36,9 @@ import {
   loadAllSponsorAdsForAdmin,
   createSponsorAd,
   updateSponsorAd,
-  deleteSponsorAd
+  deleteSponsorAd,
+  loadAllSponsorEnquiriesForAdmin,
+  markSponsorEnquiryContacted
 } from '../services/sponsorAdsService';
 import {
   getLaunchDateFromFirestore,
@@ -62,7 +69,7 @@ export const AdminWithdrawalModal: React.FC<AdminWithdrawalModalProps> = ({
   currentUserEmail,
   seniorMode = false,
 }) => {
-  const [activeAdminTab, setActiveAdminTab] = useState<'withdrawals' | 'sponsor_ads' | 'rotation'>('withdrawals');
+  const [activeAdminTab, setActiveAdminTab] = useState<'withdrawals' | 'sponsor_ads' | 'enquiries' | 'rotation'>('withdrawals');
 
   // Withdrawals state
   const [requests, setRequests] = useState<WithdrawalRequest[]>([]);
@@ -78,6 +85,12 @@ export const AdminWithdrawalModal: React.FC<AdminWithdrawalModalProps> = ({
   const [showAddAdForm, setShowAddAdForm] = useState(false);
   const [editingAdId, setEditingAdId] = useState<string | null>(null);
   const [copiedReport, setCopiedReport] = useState(false);
+
+  // Sponsor Enquiries state
+  const [enquiries, setEnquiries] = useState<SponsorEnquiry[]>([]);
+  const [loadingEnquiries, setLoadingEnquiries] = useState(false);
+  const [copiedEnquiryKey, setCopiedEnquiryKey] = useState<string | null>(null);
+  const [contactingId, setContactingId] = useState<string | null>(null);
 
   // Sponsor Ad Form fields
   const [adForm, setAdForm] = useState({
@@ -120,6 +133,14 @@ export const AdminWithdrawalModal: React.FC<AdminWithdrawalModalProps> = ({
     setLoadingAds(false);
   };
 
+  // Fetch sponsor enquiries
+  const fetchEnquiries = async () => {
+    setLoadingEnquiries(true);
+    const data = await loadAllSponsorEnquiriesForAdmin();
+    setEnquiries(data);
+    setLoadingEnquiries(false);
+  };
+
   // Fetch rotation launch date
   const fetchLaunchDate = async () => {
     setLoadingLaunchDate(true);
@@ -132,9 +153,35 @@ export const AdminWithdrawalModal: React.FC<AdminWithdrawalModalProps> = ({
     if (isOpen) {
       fetchWithdrawals();
       fetchSponsorAds();
+      fetchEnquiries();
       fetchLaunchDate();
     }
   }, [isOpen]);
+
+  // Copy helper for sponsor enquiry fields
+  const handleCopyEnquiryField = (text: string, key: string) => {
+    soundService.playClick();
+    if (navigator.clipboard) {
+      navigator.clipboard.writeText(text);
+      setCopiedEnquiryKey(key);
+      setTimeout(() => setCopiedEnquiryKey(null), 2500);
+    }
+  };
+
+  // Mark sponsor enquiry contacted
+  const handleMarkEnquiryContacted = async (id: string) => {
+    soundService.playClick();
+    setContactingId(id);
+    try {
+      await markSponsorEnquiryContacted(id);
+      setEnquiries((prev) =>
+        prev.map((e) => (e.id === id ? { ...e, status: 'contacted' as const } : e))
+      );
+      soundService.playFanfare();
+    } finally {
+      setContactingId(null);
+    }
+  };
 
   // Copy account details helper
   const handleCopyAccountDetails = (text: string, id: string) => {
@@ -383,6 +430,21 @@ export const AdminWithdrawalModal: React.FC<AdminWithdrawalModalProps> = ({
           >
             <Megaphone className="w-3.5 h-3.5" />
             <span>Sponsor Ads ({sponsorAds.length})</span>
+          </button>
+
+          <button
+            onClick={() => {
+              soundService.playClick();
+              setActiveAdminTab('enquiries');
+            }}
+            className={`flex-1 py-3 text-center transition-all flex items-center justify-center gap-1.5 border-b-2 ${
+              activeAdminTab === 'enquiries'
+                ? 'border-amber-500 text-amber-400 bg-slate-800/90 font-black'
+                : 'border-transparent text-slate-400 hover:text-white'
+            }`}
+          >
+            <Inbox className="w-3.5 h-3.5" />
+            <span>Sponsor Enquiries ({enquiries.length})</span>
           </button>
 
           <button
@@ -905,6 +967,215 @@ export const AdminWithdrawalModal: React.FC<AdminWithdrawalModalProps> = ({
                       })}
                     </tbody>
                   </table>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* TAB: SPONSOR ENQUIRIES */}
+        {activeAdminTab === 'enquiries' && (
+          <div className="flex-1 overflow-y-auto p-4 space-y-4">
+            <div className="bg-slate-800/90 border border-slate-700 rounded-2xl p-4 space-y-3.5">
+              <div className="flex items-center justify-between gap-2 border-b border-slate-700 pb-3">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-9 h-9 rounded-xl bg-amber-500/20 text-amber-400 flex items-center justify-center text-lg">
+                    📢
+                  </div>
+                  <div>
+                    <h4 className="font-black text-sm text-white">Sponsor Enquiries</h4>
+                    <p className="text-[11px] text-slate-400">
+                      Inbound sponsor partnership requests ({enquiries.length} total) • Newest first
+                    </p>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={fetchEnquiries}
+                  disabled={loadingEnquiries}
+                  className="px-3 py-1.5 bg-slate-700 hover:bg-slate-600 rounded-xl text-xs font-bold text-slate-200 flex items-center gap-1.5 tap-bounce"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${loadingEnquiries ? 'animate-spin' : ''}`} />
+                  <span>Refresh</span>
+                </button>
+              </div>
+
+              {loadingEnquiries ? (
+                <div className="py-12 text-center text-slate-400 text-xs">
+                  <RefreshCw className="w-6 h-6 animate-spin mx-auto mb-2 text-amber-500" />
+                  <span>Loading sponsor enquiries...</span>
+                </div>
+              ) : enquiries.length === 0 ? (
+                <div className="py-12 text-center text-slate-400 text-xs bg-slate-900/50 rounded-2xl border border-slate-800 p-6 space-y-1">
+                  <Inbox className="w-8 h-8 mx-auto text-slate-600 mb-2" />
+                  <p className="font-black text-slate-300">No sponsor enquiries yet</p>
+                  <p className="text-[11px] text-slate-500">
+                    When prospective sponsors submit an enquiry through the &quot;Advertise with us&quot; section, their details will appear here.
+                  </p>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {enquiries.map((enquiry) => {
+                    const isContacted = enquiry.status === 'contacted';
+                    const isContacting = contactingId === enquiry.id;
+                    const dateFormatted = enquiry.createdAt?.toMillis
+                      ? new Date(enquiry.createdAt.toMillis()).toLocaleString()
+                      : enquiry.createdAt
+                      ? new Date(enquiry.createdAt).toLocaleString()
+                      : 'Recently submitted';
+
+                    return (
+                      <div
+                        key={enquiry.id}
+                        className={`p-3.5 rounded-2xl border transition-all space-y-2.5 ${
+                          isContacted
+                            ? 'bg-slate-900/70 border-slate-800 opacity-90'
+                            : 'bg-slate-900 border-amber-500/40 ring-1 ring-amber-500/20'
+                        }`}
+                      >
+                        {/* Top row: Status, timestamp, and Mark as Contacted action */}
+                        <div className="flex items-center justify-between gap-2 flex-wrap">
+                          <div className="flex items-center gap-2">
+                            <span
+                              className={`px-2 py-0.5 rounded-full text-[10px] font-black ${
+                                isContacted
+                                  ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
+                                  : 'bg-amber-500/20 text-amber-300 border border-amber-500/40 animate-pulse'
+                              }`}
+                            >
+                              {isContacted ? 'Contacted ✓' : 'New Enquiry'}
+                            </span>
+                            <span className="text-[10px] text-slate-400 font-mono">
+                              {dateFormatted}
+                            </span>
+                          </div>
+
+                          {!isContacted ? (
+                            <button
+                              type="button"
+                              onClick={() => handleMarkEnquiryContacted(enquiry.id)}
+                              disabled={isContacting}
+                              className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white rounded-lg text-[10px] font-black flex items-center gap-1 shadow-xs tap-bounce"
+                            >
+                              {isContacting ? (
+                                <>
+                                  <RefreshCw className="w-3 h-3 animate-spin" />
+                                  <span>Saving...</span>
+                                </>
+                              ) : (
+                                <>
+                                  <Check className="w-3 h-3" />
+                                  <span>Mark as Contacted</span>
+                                </>
+                              )}
+                            </button>
+                          ) : (
+                            <span className="text-[10px] text-emerald-400 font-bold flex items-center gap-1">
+                              <CheckCircle2 className="w-3 h-3" />
+                              <span>Contacted</span>
+                            </span>
+                          )}
+                        </div>
+
+                        {/* Business Name and Link */}
+                        <div className="space-y-1">
+                          <h5 className="font-black text-sm text-white flex items-center gap-1.5">
+                            <Building className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                            <span>{enquiry.businessName}</span>
+                          </h5>
+                          {enquiry.websiteLink && (
+                            <a
+                              href={enquiry.websiteLink}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-xs text-sky-400 hover:underline flex items-center gap-1 font-mono break-all"
+                            >
+                              <Globe className="w-3 h-3 shrink-0" />
+                              <span>{enquiry.websiteLink}</span>
+                              <ExternalLink className="w-2.5 h-2.5 shrink-0" />
+                            </a>
+                          )}
+                        </div>
+
+                        {/* Contact details with Copy buttons */}
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+                          {/* Email copy */}
+                          <div className="flex items-center justify-between p-2 rounded-xl bg-slate-800/80 border border-slate-700">
+                            <div className="flex items-center gap-1.5 min-w-0">
+                              <Mail className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                              <span className="text-xs text-slate-200 font-mono truncate" title={enquiry.email}>
+                                {enquiry.email}
+                              </span>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => handleCopyEnquiryField(enquiry.email, `${enquiry.id}-email`)}
+                              className="ml-2 px-2 py-1 bg-slate-700 hover:bg-slate-600 text-[10px] font-black rounded-lg text-slate-200 flex items-center gap-1 shrink-0 tap-bounce"
+                              title="Copy Email"
+                            >
+                              {copiedEnquiryKey === `${enquiry.id}-email` ? (
+                                <>
+                                  <Check className="w-3 h-3 text-emerald-400" />
+                                  <span className="text-emerald-400">Copied!</span>
+                                </>
+                              ) : (
+                                <>
+                                  <Copy className="w-3 h-3" />
+                                  <span>Copy Email</span>
+                                </>
+                              )}
+                            </button>
+                          </div>
+
+                          {/* Phone copy */}
+                          {enquiry.phone ? (
+                            <div className="flex items-center justify-between p-2 rounded-xl bg-slate-800/80 border border-slate-700">
+                              <div className="flex items-center gap-1.5 min-w-0">
+                                <Phone className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                                <span className="text-xs text-slate-200 font-mono truncate" title={enquiry.phone}>
+                                  {enquiry.phone}
+                                </span>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => handleCopyEnquiryField(enquiry.phone!, `${enquiry.id}-phone`)}
+                                className="ml-2 px-2 py-1 bg-slate-700 hover:bg-slate-600 text-[10px] font-black rounded-lg text-slate-200 flex items-center gap-1 shrink-0 tap-bounce"
+                                title="Copy Phone"
+                              >
+                                {copiedEnquiryKey === `${enquiry.id}-phone` ? (
+                                  <>
+                                    <Check className="w-3 h-3 text-emerald-400" />
+                                    <span className="text-emerald-400">Copied!</span>
+                                  </>
+                                ) : (
+                                  <>
+                                    <Copy className="w-3 h-3" />
+                                    <span>Copy Phone</span>
+                                  </>
+                                )}
+                              </button>
+                            </div>
+                          ) : (
+                            <div className="flex items-center p-2 rounded-xl bg-slate-800/40 border border-slate-800 text-[11px] text-slate-500 italic">
+                              <Phone className="w-3.5 h-3.5 mr-1.5 opacity-50 shrink-0" />
+                              <span>No phone provided</span>
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Message */}
+                        <div className="p-2.5 rounded-xl bg-slate-800/60 border border-slate-750 text-xs text-slate-200 space-y-1">
+                          <span className="text-[10px] font-black text-slate-400 uppercase tracking-wider block">
+                            Enquiry Message ({enquiry.message?.length || 0}/1000)
+                          </span>
+                          <p className="whitespace-pre-wrap leading-relaxed font-sans text-slate-300">
+                            {enquiry.message}
+                          </p>
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
               )}
             </div>

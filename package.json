@@ -5,12 +5,12 @@
   "type": "module",
   "scripts": {
     "dev": "vite --port=3000 --host=0.0.0.0",
-    "build": "vite build && python3 build-aab-package.py && python3 package-project.py",
+    "build": "vite build && python3 build-aab-package.py",
     "preview": "vite preview",
     "clean": "rm -rf dist server.js",
     "lint": "tsc --noEmit",
-    "build:bundle": "vite build && python3 build-aab-package.py && python3 package-project.py",
-    "build:aab": "vite build && python3 build-aab-package.py && python3 package-project.py"
+    "build:bundle": "vite build && python3 build-aab-package.py",
+    "build:aab": "vite build && python3 build-aab-package.py"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",

@@ -1,4 +1,4 @@
-import { SponsorAd } from '../types';
+import { SponsorAd, SponsorEnquiry } from '../types';
 import { getFirestoreDB } from './firestoreService';
 import {
   collection,
@@ -9,7 +9,8 @@ import {
   updateDoc,
   deleteDoc,
   query,
-  where
+  where,
+  serverTimestamp
 } from 'firebase/firestore';
 
 const LOCAL_STORAGE_KEY = 'joyearn_sponsor_ads_cache';
@@ -240,4 +241,109 @@ export async function recordAdClick(adId: string): Promise<void> {
       }
     } catch {}
   }
+}
+
+export async function submitSponsorEnquiry(
+  userId: string,
+  data: {
+    businessName: string;
+    websiteLink: string;
+    email: string;
+    phone?: string;
+    message: string;
+  }
+): Promise<{ success: boolean; id: string }> {
+  const todayStr = new Date().toISOString().slice(0, 10);
+  const docId = `${userId}_${todayStr}`;
+  const db = getFirestoreDB();
+
+  const enquiryData: any = {
+    id: docId,
+    userId,
+    businessName: data.businessName.trim(),
+    websiteLink: data.websiteLink.trim(),
+    email: data.email.trim(),
+    phone: data.phone?.trim() || '',
+    message: data.message.trim().slice(0, 1000),
+    status: 'new',
+    createdAt: serverTimestamp(),
+  };
+
+  if (db) {
+    const docRef = doc(db, 'sponsor_enquiries', docId);
+    await setDoc(docRef, enquiryData);
+  }
+
+  // Also mirror to local storage
+  try {
+    const key = 'joyearn_sponsor_enquiries_local';
+    const existing = JSON.parse(localStorage.getItem(key) || '[]');
+    const filtered = existing.filter((e: any) => e.id !== docId);
+    localStorage.setItem(
+      key,
+      JSON.stringify([
+        { ...enquiryData, createdAt: new Date().toISOString() },
+        ...filtered,
+      ])
+    );
+  } catch {}
+
+  return { success: true, id: docId };
+}
+
+export async function loadAllSponsorEnquiriesForAdmin(): Promise<SponsorEnquiry[]> {
+  const db = getFirestoreDB();
+  if (db) {
+    try {
+      const colRef = collection(db, 'sponsor_enquiries');
+      const snap = await getDocs(colRef);
+      const list: SponsorEnquiry[] = [];
+      snap.forEach((d) => {
+        list.push({ ...d.data(), id: d.id } as SponsorEnquiry);
+      });
+      list.sort((a, b) => {
+        const timeA = a.createdAt?.toMillis
+          ? a.createdAt.toMillis()
+          : new Date(a.createdAt || 0).getTime();
+        const timeB = b.createdAt?.toMillis
+          ? b.createdAt.toMillis()
+          : new Date(b.createdAt || 0).getTime();
+        return timeB - timeA;
+      });
+      if (list.length > 0) return list;
+    } catch (e) {
+      console.warn('Error loading sponsor enquiries from Firestore:', e);
+    }
+  }
+
+  try {
+    const key = 'joyearn_sponsor_enquiries_local';
+    const list: SponsorEnquiry[] = JSON.parse(localStorage.getItem(key) || '[]');
+    return list;
+  } catch {
+    return [];
+  }
+}
+
+export async function markSponsorEnquiryContacted(enquiryId: string): Promise<boolean> {
+  const db = getFirestoreDB();
+  if (db) {
+    try {
+      const docRef = doc(db, 'sponsor_enquiries', enquiryId);
+      await updateDoc(docRef, { status: 'contacted' });
+    } catch (e) {
+      console.warn('Error updating sponsor enquiry status in Firestore:', e);
+    }
+  }
+
+  try {
+    const key = 'joyearn_sponsor_enquiries_local';
+    const list: SponsorEnquiry[] = JSON.parse(localStorage.getItem(key) || '[]');
+    const updated = list.map((item) =>
+      item.id === enquiryId ? { ...item, status: 'contacted' as const } : item
+    );
+    localStorage.setItem(key, JSON.stringify(updated));
+  } catch {}
+
+  return true;
 }

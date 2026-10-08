@@ -27,7 +27,7 @@ import {
   Eye,
   Star,
   Sparkles,
-  Download,
+  Megaphone,
   Bell,
   BellOff,
   HardDrive,
@@ -66,6 +66,7 @@ interface SettingsModalProps {
   onLogout?: () => void;
   onDeleteAccount?: () => void;
   onOpenAdmin?: () => void;
+  onOpenAdvertiseModal?: () => void;
   totalJoyPointsEarned?: number;
   totalActivitiesCompleted?: number;
   totalOfflineVideosSaved?: number;
@@ -93,6 +94,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   onLogout,
   onDeleteAccount,
   onOpenAdmin,
+  onOpenAdvertiseModal,
   totalJoyPointsEarned,
   totalActivitiesCompleted,
   totalOfflineVideosSaved,
@@ -1158,6 +1160,21 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   <ChevronRight className="w-3.5 h-3.5 text-amber-400" />
                 </button>
               )}
+
+              {/* Advertise with us (Sponsor Promotion) */}
+              <button
+                onClick={() => {
+                  soundService.playClick();
+                  onOpenAdvertiseModal?.();
+                }}
+                className="w-full py-2 bg-gradient-to-r from-amber-50 to-orange-50 dark:from-slate-800 dark:to-slate-850 border border-amber-300 dark:border-amber-700/70 hover:border-amber-400 text-slate-900 dark:text-white font-extrabold rounded-xl tap-bounce flex items-center justify-between px-3 text-xs shadow-2xs"
+              >
+                <span className="flex items-center gap-1.5">
+                  <Megaphone className="w-3.5 h-3.5 text-amber-600" />
+                  <span>{isUrdu ? 'ہمارے ساتھ تشہیر کریں (Advertise with us)' : 'Advertise with us (Sponsor Promotion)'}</span>
+                </span>
+                <ChevronRight className="w-3.5 h-3.5 text-amber-500" />
+              </button>
 
               {/* Account Deletion */}
               <button

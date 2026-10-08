@@ -123,6 +123,19 @@ export const STREAK_MILESTONES: MilestoneItem[] = [
     tier: 'legendary',
     perkDescription: 'Royal Crown Badge + 2,000 Points + VIP Profile Frame',
     urduPerkDescription: 'شاہی تاج بیج + 2,000 پوائنٹس + وی آئی پی فریم'
+  },
+  {
+    id: 'daily_5goal_30',
+    streakDaysRequired: 30,
+    title: '30-Day 5/5 Goal Perfection',
+    urduTitle: '30 روزہ 5/5 ہدف پرفیکشن',
+    subtitle: 'Hit 5/5 daily activity goal for 30 consecutive days',
+    urduSubtitle: 'مسلسل 30 دن تک روزانہ 5/5 سرگرمیوں کا ہدف حاصل کیا',
+    rewardPoints: 2500,
+    icon: '🎖️',
+    tier: 'legendary',
+    perkDescription: '30-Day Perfection Badge + 2,500 Points + Legendary Crown',
+    urduPerkDescription: '30 روزہ پرفیکشن بیج + 2,500 پوائنٹس'
   }
 ];
 

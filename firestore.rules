@@ -127,5 +127,27 @@ service cloud.firestore {
       allow create: if true;
       allow read, update, delete: if isAdmin();
     }
+
+    // Sponsor Enquiries: Signed-in users can only create their own enquiry with valid fields & length limits,
+    // and createdAt equal to request.time. Only verified admin can read, update or delete.
+    match /sponsor_enquiries/{enquiryId} {
+      allow create: if request.auth != null &&
+        request.resource.data.userId == request.auth.uid &&
+        request.resource.data.businessName is string &&
+        request.resource.data.businessName.size() > 0 &&
+        request.resource.data.businessName.size() <= 150 &&
+        request.resource.data.websiteLink is string &&
+        request.resource.data.websiteLink.size() <= 300 &&
+        request.resource.data.email is string &&
+        request.resource.data.email.size() <= 100 &&
+        (!('phone' in request.resource.data) || (request.resource.data.phone is string && request.resource.data.phone.size() <= 50)) &&
+        request.resource.data.message is string &&
+        request.resource.data.message.size() > 0 &&
+        request.resource.data.message.size() <= 1000 &&
+        request.resource.data.status == 'new' &&
+        request.resource.data.createdAt == request.time;
+
+      allow read, update, delete: if isAdmin();
+    }
   }
 }

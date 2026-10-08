@@ -6,27 +6,9 @@
 
 /**
  * Minimum number of 100% completed days needed in a month to be eligible for a payout
- * (Editable variable, Default: 15 days)
+ * (Fixed constant: 15 days)
  */
-export let MIN_ACTIVE_DAYS: number = (() => {
-  try {
-    const saved = localStorage.getItem('joyearn_min_active_days');
-    if (saved) {
-      const parsed = parseInt(saved, 10);
-      if (!isNaN(parsed) && parsed > 0 && parsed <= 31) return parsed;
-    }
-  } catch {}
-  return 15;
-})();
-
-export function setMinActiveDays(days: number): number {
-  const sanitized = Math.max(1, Math.min(31, Math.round(days)));
-  MIN_ACTIVE_DAYS = sanitized;
-  try {
-    localStorage.setItem('joyearn_min_active_days', String(sanitized));
-  } catch {}
-  return sanitized;
-}
+export const MIN_ACTIVE_DAYS = 15;
 
 /**
  * Notice required in Daily Tasks card and Wallet

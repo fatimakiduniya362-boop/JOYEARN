@@ -1,7 +1,7 @@
 import React, { useEffect, useRef } from 'react';
 import { ExternalLink, ShieldCheck, Sparkles } from 'lucide-react';
 import { SponsorAd } from '../types';
-import { recordAdImpression, recordAdClick } from '../services/sponsorAdsService';
+import { recordAdImpression, recordAdClick, loadActiveSponsorAds } from '../services/sponsorAdsService';
 import { soundService } from '../services/soundService';
 
 interface SponsorAdCardProps {
@@ -154,7 +154,6 @@ export const RotatingSponsorAdCard: React.FC<RotatingSponsorAdCardProps> = ({
     let active = true;
     (async () => {
       try {
-        const { loadActiveSponsorAds } = await import('../services/sponsorAdsService');
         const activeAds = await loadActiveSponsorAds();
         if (active && activeAds.length > 0) {
           setAds(activeAds);

@@ -35,7 +35,7 @@ export const AppRateModal: React.FC<AppRateModalProps> = ({
     localStorage.setItem('joyearn_rate_date', new Date().toISOString());
 
     // In a native Android environment, open Play Store intent
-    const playStoreUrl = 'https://play.google.com/store/apps/details?id=PACKAGE_NAME_HERE';
+    const playStoreUrl = 'https://play.google.com/store/apps/details?id=com.joyearn.app';
     if (typeof window !== 'undefined') {
       window.open(playStoreUrl, '_blank', 'noopener,noreferrer');
     }

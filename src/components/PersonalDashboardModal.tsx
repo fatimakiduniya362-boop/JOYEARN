@@ -30,6 +30,7 @@ import { StreakHistoryChart } from './StreakHistoryChart';
 import { ShareStreakModal } from './ShareStreakModal';
 import { DailyGoalTracker } from './DailyGoalTracker';
 import { WeeklyStreakSummary } from './WeeklyStreakSummary';
+import { DailyMilestoneSection } from './DailyMilestoneSection';
 import { StreakLeaderboardModal } from './StreakLeaderboardModal';
 import { Share2 } from 'lucide-react';
 
@@ -431,6 +432,16 @@ export const PersonalDashboardModal: React.FC<PersonalDashboardModalProps> = ({
                 seniorMode={seniorMode}
               />
 
+              {/* DAILY MILESTONE SECTION: Tracks count of 5/5 daily goals reached & 30-day streak unique badge */}
+              <DailyMilestoneSection
+                completedActivitiesCount={completedActivitiesCount}
+                streakDays={streakDays}
+                seniorMode={seniorMode}
+                onClaimMilestone={onClaimMilestone}
+                claimedMilestoneIds={claimedMilestoneIds}
+                onTriggerConfetti={onTriggerConfetti}
+              />
+
               {/* ACTIVITY & STREAK ANALYTICS TOGGLE */}
               <div className="flex items-center justify-between bg-slate-100 p-1 rounded-2xl text-xs font-black shadow-inner">
                 <button
@@ -632,6 +643,89 @@ export const PersonalDashboardModal: React.FC<PersonalDashboardModalProps> = ({
                     ) : (
                       <span className="px-2.5 py-1 bg-emerald-100 dark:bg-emerald-950 text-emerald-800 dark:text-emerald-300 font-bold text-xs rounded-lg border border-emerald-300">
                         Achieved 🎖️
+                      </span>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* 30-DAY DAILY GOAL PERFECTION BADGE CARD (Unlocks when user achieves 30-day streak of hitting 5/5 goal) */}
+              <div className="bg-gradient-to-br from-amber-500/15 via-yellow-400/15 to-orange-500/15 border-2 border-amber-400 rounded-2xl p-4 space-y-3 shadow-md relative overflow-hidden">
+                <div className="flex items-start justify-between gap-2">
+                  <div className="flex items-center gap-3">
+                    <div className="w-11 h-11 rounded-2xl bg-gradient-to-tr from-amber-500 via-yellow-400 to-amber-600 text-slate-950 flex items-center justify-center text-2xl shadow-md shrink-0 border border-yellow-200">
+                      👑
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <h4 className="font-black text-sm text-slate-900 dark:text-white">
+                          {seniorMode ? '30 روزہ 5/5 ہدف پرفیکشن بیج' : '30-Day 5/5 Goal Perfection Badge'}
+                        </h4>
+                        <span
+                          className={`text-[9.5px] font-black px-2 py-0.5 rounded-full uppercase tracking-wider border ${
+                            streakDays >= 30
+                              ? 'bg-amber-400 text-slate-950 border-amber-500 font-black'
+                              : 'bg-slate-100 text-slate-700 border-slate-300 dark:bg-slate-800 dark:text-slate-300'
+                          }`}
+                        >
+                          {streakDays >= 30 ? 'Unlocked Legendary 🎉' : `${Math.min(streakDays, 30)}/30 Days`}
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-slate-600 dark:text-slate-300 font-medium mt-0.5">
+                        {seniorMode
+                          ? 'مسلسل 30 دن تک روزانہ 5/5 سرگرمیوں کا ہدف مکمل کرنے پر حاصل ہوتا ہے۔'
+                          : 'Unique badge awarded for an unbroken 30-day streak of hitting the 5-activity daily goal.'}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Progress Bar & Status */}
+                <div className="space-y-1">
+                  <div className="flex items-center justify-between text-xs font-bold">
+                    <span className="text-slate-700 dark:text-slate-200">
+                      {seniorMode ? '30 روزہ تسلسل کی پیشرفت:' : '30-Day Consecutive Goal Progress:'}
+                    </span>
+                    <span className="text-amber-600 dark:text-amber-400 font-extrabold font-mono">
+                      {Math.min(streakDays, 30)} / 30 Days ({Math.round(Math.min(streakDays / 30, 1) * 100)}%)
+                    </span>
+                  </div>
+                  <div className="h-2.5 w-full bg-slate-200 dark:bg-slate-700 rounded-full overflow-hidden p-0.5">
+                    <div
+                      className="h-full rounded-full bg-gradient-to-r from-amber-500 via-yellow-400 to-amber-600 transition-all duration-700"
+                      style={{ width: `${Math.min(100, Math.round((streakDays / 30) * 100))}%` }}
+                    />
+                  </div>
+                </div>
+
+                {/* Claim / Status */}
+                {streakDays >= 30 && (
+                  <div className="pt-1 flex items-center justify-between bg-white dark:bg-slate-850 p-2.5 rounded-xl border border-amber-300 dark:border-amber-700">
+                    <div className="text-xs">
+                      <span className="font-black text-slate-900 dark:text-white block">
+                        {claimedMilestoneIds?.includes('daily_5goal_30')
+                          ? 'Legendary Badge Claimed ✓'
+                          : 'Legendary Badge Ready to Claim! 🎁'}
+                      </span>
+                      <span className="text-[10px] text-amber-600 font-bold">
+                        +2,500 JoyPoints Titan Award
+                      </span>
+                    </div>
+
+                    {!claimedMilestoneIds?.includes('daily_5goal_30') ? (
+                      <button
+                        onClick={() => {
+                          soundService.playFanfare();
+                          onTriggerConfetti?.();
+                          onClaimMilestone?.('daily_5goal_30', 2500, '30-Day 5/5 Goal Perfection');
+                        }}
+                        className="px-3 py-1.5 bg-gradient-to-r from-amber-500 to-yellow-400 hover:brightness-110 text-slate-950 font-black text-xs rounded-xl shadow-md tap-bounce animate-pulse"
+                      >
+                        Claim 2,500 Pts
+                      </button>
+                    ) : (
+                      <span className="px-2.5 py-1 bg-emerald-100 dark:bg-emerald-950 text-emerald-800 dark:text-emerald-300 font-bold text-xs rounded-lg border border-emerald-300">
+                        Achieved 👑
                       </span>
                     )}
                   </div>

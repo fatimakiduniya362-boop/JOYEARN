@@ -50,6 +50,7 @@ export const PrivacyPolicyModal: React.FC<PrivacyPolicyModalProps> = ({ onClose,
               <li>Google Account display name & email (when user elects to Continue with Google).</li>
               <li>In-app points, activity streak, and transaction history.</li>
               <li>Local cache preferences (language, sound preferences, theme).</li>
+              <li>Sponsor enquiry details (business name, link, email, optional phone and message) are stored only to reply to the enquiry.</li>
             </ul>
           </div>
 
@@ -59,7 +60,7 @@ export const PrivacyPolicyModal: React.FC<PrivacyPolicyModalProps> = ({ onClose,
               2. How We Use & Protect Data
             </h4>
             <p>
-              Your data is never sold, leased, or rented to third-party data brokers. All communications with Google APIs and servers use industry-standard HTTPS TLS encryption.
+              Your data is never sold, leased, or rented to third-party data brokers. All communications with Google APIs and servers use industry-standard HTTPS TLS encryption. Sponsor enquiry details (business name, link, email, optional phone and message) are stored only to reply to the enquiry.
             </p>
           </div>
 

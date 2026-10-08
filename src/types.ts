@@ -245,6 +245,18 @@ export interface SponsorAd {
   createdAt?: string;
 }
 
+export interface SponsorEnquiry {
+  id: string;
+  userId: string;
+  businessName: string;
+  websiteLink: string;
+  email: string;
+  phone?: string;
+  message: string;
+  createdAt?: any;
+  status: 'new' | 'contacted';
+}
+
 export interface QuizLeaderboardPlayer {
   rank: number;
   name: string;
