@@ -216,7 +216,7 @@ export const INITIAL_VIDEOS: VideoContent[] = [
   {
     id: 'v3',
     title: 'Solar System 101: Planetary Science & Space Exploration',
-    category: 'Skills',
+    category: 'Science',
     duration: '3:00',
     points: 25,
     author: 'National Geographic',
@@ -229,7 +229,7 @@ export const INITIAL_VIDEOS: VideoContent[] = [
   {
     id: 'v4',
     title: '3D Cube Stacking Origami Craft & Creative Paper Art',
-    category: 'Crafts',
+    category: 'Art',
     duration: '3:10',
     points: 30,
     author: 'JR PAPER ART',
@@ -264,6 +264,19 @@ export const INITIAL_VIDEOS: VideoContent[] = [
     fileSize: '10.2 MB',
     summary: 'Award-winning heartfelt animated tale of perseverance, kindness, and helping others.',
     videoUrl: 'https://www.youtube-nocookie.com/embed/07d2dXHYb94?rel=0',
+  },
+  {
+    id: 'v7',
+    title: 'Mental Math Tricks & Rapid Arithmetic Strategies',
+    category: 'Math',
+    duration: '3:30',
+    points: 25,
+    author: 'Math Antics',
+    thumbnail: 'https://i.ytimg.com/vi/dQw4w9WgXcQ/hqdefault.jpg',
+    isOffline: true,
+    fileSize: '8.4 MB',
+    summary: 'Engaging visual patterns, shortcuts, and joyful number tricks for students and families.',
+    videoUrl: 'https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ?rel=0',
   },
 ];
 

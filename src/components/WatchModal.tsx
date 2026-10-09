@@ -13,14 +13,20 @@ import {
   AlertTriangle,
   Loader2,
   ShieldCheck,
-  Award
+  Award,
+  ListPlus
 } from 'lucide-react';
-import { VideoContent } from '../types';
+import { VideoContent, CustomPlaylist } from '../types';
 import { useHaptics } from '../hooks/useHaptics';
 import { soundService } from '../services/soundService';
 import { VideoThumbnail, extractYouTubeId } from './VideoThumbnail';
 import { submitContentReport } from '../services/firestoreService';
 import { RotatingSponsorAdCard } from './SponsorAdCard';
+import { CategoryFilter, DEFAULT_VIDEO_CATEGORIES } from './CategoryFilter';
+import { VideoHistory } from './VideoHistory';
+import { playlistService } from '../services/playlistService';
+import { PlaylistBar } from './PlaylistBar';
+import { AddToPlaylistModal } from './AddToPlaylistModal';
 
 interface WatchModalProps {
   videos: VideoContent[];
@@ -104,6 +110,93 @@ export const WatchModal: React.FC<WatchModalProps> = ({
       return false;
     }
   };
+
+  // Video History: Track the last 5 watched videos for quick re-watching
+  const [historyVideoIds, setHistoryVideoIds] = useState<string[]>(() => {
+    try {
+      const stored = localStorage.getItem('joyearn_video_watch_history');
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          return parsed.slice(0, 5);
+        }
+      }
+    } catch {}
+    if (watchedVideoIds && watchedVideoIds.length > 0) {
+      return [...watchedVideoIds].reverse().slice(0, 5);
+    }
+    return [];
+  });
+
+  const recordToHistory = useCallback((videoId: string) => {
+    if (!videoId) return;
+    setHistoryVideoIds((prev) => {
+      const next = [videoId, ...prev.filter((id) => id !== videoId)].slice(0, 5);
+      try {
+        localStorage.setItem('joyearn_video_watch_history', JSON.stringify(next));
+      } catch {}
+      return next;
+    });
+  }, []);
+
+  const handleClearHistory = useCallback(() => {
+    setHistoryVideoIds([]);
+    try {
+      localStorage.removeItem('joyearn_video_watch_history');
+    } catch {}
+  }, []);
+
+  // Sync selected video into watch history
+  useEffect(() => {
+    if (selectedVideo?.id) {
+      recordToHistory(selectedVideo.id);
+    }
+  }, [selectedVideo?.id, recordToHistory]);
+
+  const historyVideos = useMemo(() => {
+    return historyVideoIds
+      .map((id) => workingVideos.find((v) => v.id === id) || videos.find((v) => v.id === id))
+      .filter((v): v is VideoContent => Boolean(v));
+  }, [historyVideoIds, workingVideos, videos]);
+
+  // Playlist Feature: State for custom playlists
+  const [playlists, setPlaylists] = useState<CustomPlaylist[]>(() => playlistService.getPlaylists());
+  const [activePlaylistId, setActivePlaylistId] = useState<string | null>(null);
+  const [playlistModalVideo, setPlaylistModalVideo] = useState<VideoContent | null>(null);
+
+  const activePlaylist = useMemo(() => {
+    return playlists.find((p) => p.id === activePlaylistId) || null;
+  }, [playlists, activePlaylistId]);
+
+  const playlistVideos = useMemo(() => {
+    if (!activePlaylist) return [];
+    return activePlaylist.videoIds
+      .map((id) => workingVideos.find((v) => v.id === id) || videos.find((v) => v.id === id))
+      .filter((v): v is VideoContent => Boolean(v));
+  }, [activePlaylist, workingVideos, videos]);
+
+  const handlePlayAll = useCallback((videosToPlay: VideoContent[]) => {
+    if (videosToPlay && videosToPlay.length > 0) {
+      setSelectedVideo(videosToPlay[0]);
+      setIsPlaying(true);
+      soundService.playSuccess();
+    }
+  }, []);
+
+  const handleCreatePlaylist = useCallback((name: string, emoji = '📁') => {
+    const created = playlistService.createPlaylist(name, emoji);
+    const updated = playlistService.getPlaylists();
+    setPlaylists(updated);
+    setActivePlaylistId(created.id);
+  }, []);
+
+  const handleDeletePlaylist = useCallback((playlistId: string) => {
+    const updated = playlistService.deletePlaylist(playlistId);
+    setPlaylists(updated);
+    if (activePlaylistId === playlistId) {
+      setActivePlaylistId(null);
+    }
+  }, [activePlaylistId]);
 
   const currentVideoId = extractYouTubeId(selectedVideo.videoUrl);
 
@@ -191,6 +284,7 @@ export const WatchModal: React.FC<WatchModalProps> = ({
     selection();
     soundService.playClick();
     setSelectedVideo(video);
+    recordToHistory(video.id);
   };
 
   const handleRetry = () => {
@@ -222,11 +316,73 @@ export const WatchModal: React.FC<WatchModalProps> = ({
     }
   };
 
-  const categories = ['All', 'Skills', 'Crafts', 'Nature', 'Cooking', 'Stories'];
-  const filteredVideos =
-    activeCategory === 'All'
-      ? workingVideos
-      : workingVideos.filter((v) => v.category.toLowerCase() === activeCategory.toLowerCase());
+  const categories = DEFAULT_VIDEO_CATEGORIES;
+
+  const matchesCategory = useCallback((video: VideoContent, cat: string) => {
+    if (cat === 'All') return true;
+    const target = cat.toLowerCase();
+    const vidCat = (video.category || '').toLowerCase();
+    if (vidCat === target) return true;
+
+    // Semantic educational matching for core requested topics
+    if (target === 'science') {
+      if (vidCat === 'nature' || vidCat === 'education') return true;
+      const t = (video.title + ' ' + (video.summary || '')).toLowerCase();
+      return (
+        t.includes('science') ||
+        t.includes('solar') ||
+        t.includes('planet') ||
+        t.includes('germinate') ||
+        t.includes('photosynthesis') ||
+        t.includes('ecosystem') ||
+        t.includes('earthworm')
+      );
+    }
+    if (target === 'math') {
+      if (vidCat === 'education') return true;
+      const t = (video.title + ' ' + (video.summary || '')).toLowerCase();
+      return (
+        t.includes('math') ||
+        t.includes('number') ||
+        t.includes('arithmetic') ||
+        t.includes('count')
+      );
+    }
+    if (target === 'art') {
+      if (vidCat === 'crafts') return true;
+      const t = (video.title + ' ' + (video.summary || '')).toLowerCase();
+      return (
+        t.includes('art') ||
+        t.includes('origami') ||
+        t.includes('craft') ||
+        t.includes('draw') ||
+        t.includes('paper')
+      );
+    }
+    if (target === 'stories') {
+      if (vidCat === 'kids') return true;
+      const t = (video.title + ' ' + (video.summary || '')).toLowerCase();
+      return t.includes('story') || t.includes('tale') || t.includes('moral');
+    }
+    return false;
+  }, []);
+
+  const filteredVideos = useMemo(() => {
+    const source = activePlaylist ? playlistVideos : workingVideos;
+    if (activeCategory === 'All') return source;
+    return source.filter((v) => matchesCategory(v, activeCategory));
+  }, [activePlaylist, playlistVideos, workingVideos, activeCategory, matchesCategory]);
+
+  const videoCounts = useMemo(() => {
+    const source = activePlaylist ? playlistVideos : workingVideos;
+    const counts: Record<string, number> = { All: source.length };
+    categories.forEach((cat) => {
+      if (cat !== 'All') {
+        counts[cat] = source.filter((v) => matchesCategory(v, cat)).length;
+      }
+    });
+    return counts;
+  }, [activePlaylist, playlistVideos, workingVideos, categories, matchesCategory]);
 
   return (
     <div
@@ -398,6 +554,19 @@ export const WatchModal: React.FC<WatchModalProps> = ({
             <button
               onClick={() => {
                 light();
+                soundService.playClick();
+                setPlaylistModalVideo(selectedVideo);
+              }}
+              className="p-1.5 rounded-xl flex items-center gap-1 font-bold text-xs bg-white border border-gray-300 text-gray-700 hover:border-rose-300 hover:text-rose-600 transition-all tap-bounce"
+              title="Add current video to playlist"
+            >
+              <ListPlus className="w-3.5 h-3.5 text-rose-500" />
+              <span>Playlist</span>
+            </button>
+
+            <button
+              onClick={() => {
+                light();
                 onToggleOffline(selectedVideo.id);
               }}
               className={`p-1.5 rounded-xl flex items-center gap-1 font-bold text-xs transition-all tap-bounce ${
@@ -437,32 +606,78 @@ export const WatchModal: React.FC<WatchModalProps> = ({
           </div>
         )}
 
-        {/* Categories Bar */}
-        <div className="flex gap-1.5 px-3 py-2 overflow-x-auto no-scrollbar border-b border-gray-100 bg-white shrink-0">
-          {categories.map((cat) => (
-            <button
-              key={cat}
-              onClick={() => {
-                soundService.playClick();
-                setActiveCategory(cat);
-              }}
-              className={`px-3 py-1 rounded-full text-xs font-bold whitespace-nowrap transition-all tap-bounce ${
-                activeCategory === cat
-                  ? 'bg-rose-500 text-white shadow-2xs'
-                  : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-              }`}
-            >
-              {cat}
-            </button>
-          ))}
-        </div>
+        {/* Playlist Feature: Save & Group Favorite Videos into Custom Lists */}
+        <PlaylistBar
+          playlists={playlists}
+          activePlaylistId={activePlaylistId}
+          onSelectPlaylist={(id) => setActivePlaylistId(id)}
+          onPlayAll={handlePlayAll}
+          onCreateNewPlaylist={handleCreatePlaylist}
+          onDeletePlaylist={handleDeletePlaylist}
+          playlistVideos={playlistVideos}
+        />
+
+        {/* Category Filter Component for Educational Topics */}
+        <CategoryFilter
+          categories={categories}
+          activeCategory={activeCategory}
+          selectedCategory={activeCategory}
+          onSelectCategory={(cat) => setActiveCategory(cat)}
+          videoCounts={videoCounts}
+        />
 
         {/* Video List */}
         <div className="flex-1 overflow-y-auto p-3 space-y-2.5 bg-slate-50/50">
+          {/* Video History Section (Last 5 Watched Videos) */}
+          <VideoHistory
+            historyVideos={historyVideos}
+            currentVideoId={selectedVideo.id}
+            onSelectVideo={handleSelectVideo}
+            seniorMode={seniorMode}
+            onClearHistory={handleClearHistory}
+          />
+
           {/* Rotating Sponsor Card in Video List */}
           <div className="pb-1">
             <RotatingSponsorAdCard variant="compact" />
           </div>
+
+          {filteredVideos.length === 0 && (
+            <div className="p-6 text-center space-y-2 bg-white rounded-2xl border border-rose-100 my-2">
+              <span className="text-2xl block">{activePlaylist ? activePlaylist.emoji || '📁' : '🔍'}</span>
+              <p className="text-xs font-bold text-slate-700">
+                {activePlaylist
+                  ? `No videos in "${activePlaylist.name}". Click the + icon on any video to add it!`
+                  : `No videos currently in "${activeCategory}".`}
+              </p>
+              <div className="flex items-center justify-center gap-2 pt-1">
+                {activePlaylist && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      soundService.playClick();
+                      setActivePlaylistId(null);
+                    }}
+                    className="px-3 py-1 bg-rose-500 text-white font-bold text-xs rounded-xl tap-bounce shadow-2xs"
+                  >
+                    Browse All Videos
+                  </button>
+                )}
+                {activeCategory !== 'All' && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      soundService.playClick();
+                      setActiveCategory('All');
+                    }}
+                    className="px-3 py-1 bg-slate-600 text-white font-bold text-xs rounded-xl tap-bounce shadow-2xs"
+                  >
+                    Show All Topics
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
 
           {filteredVideos.map((video, idx) => {
             const isCurrent = video.id === selectedVideo.id;
@@ -477,40 +692,67 @@ export const WatchModal: React.FC<WatchModalProps> = ({
                 )}
                 <div
                   onClick={() => handleSelectVideo(video)}
-                className={`p-2.5 rounded-2xl border transition-all cursor-pointer flex items-center gap-3 tap-bounce ${
-                  isCurrent
-                    ? 'bg-rose-50/90 border-rose-300 ring-2 ring-rose-200 shadow-xs'
-                    : 'bg-white border-gray-200 hover:border-rose-200 shadow-2xs'
-                }`}
-              >
-                <div className="w-24 shrink-0 rounded-xl overflow-hidden shadow-xs">
-                  <VideoThumbnail
-                    videoUrl={video.videoUrl}
-                    title={video.title}
-                    duration={video.duration}
-                  />
-                </div>
-                <div className="flex-1 min-w-0">
-                  <h4 className="font-black text-xs text-gray-900 truncate">{video.title}</h4>
-                  <p className="text-[11px] text-gray-500 truncate mt-0.5">{video.summary}</p>
-                  <div className="flex items-center gap-2 mt-1 text-[10px]">
-                    <span className="text-gray-400 font-semibold">{video.duration}</span>
-                    <span className="text-rose-600 font-extrabold">+{video.points} JoyPoints</span>
-                    {video.isOffline && (
-                      <span className="bg-emerald-100 text-emerald-800 px-1.5 py-0.2 rounded font-bold">
-                        Offline Ready
-                      </span>
+                  className={`p-2.5 rounded-2xl border transition-all cursor-pointer flex items-center gap-3 tap-bounce ${
+                    isCurrent
+                      ? 'bg-rose-50/90 border-rose-300 ring-2 ring-rose-200 shadow-xs'
+                      : 'bg-white border-gray-200 hover:border-rose-200 shadow-2xs'
+                  }`}
+                >
+                  <div className="w-24 shrink-0 rounded-xl overflow-hidden shadow-xs">
+                    <VideoThumbnail
+                      videoUrl={video.videoUrl}
+                      title={video.title}
+                      duration={video.duration}
+                    />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <h4 className="font-black text-xs text-gray-900 truncate">{video.title}</h4>
+                    <p className="text-[11px] text-gray-500 truncate mt-0.5">{video.summary}</p>
+                    <div className="flex items-center gap-2 mt-1 text-[10px]">
+                      <span className="text-gray-400 font-semibold">{video.duration}</span>
+                      <span className="text-rose-600 font-extrabold">+{video.points} JoyPoints</span>
+                      {video.isOffline && (
+                        <span className="bg-emerald-100 text-emerald-800 px-1.5 py-0.2 rounded font-bold">
+                          Offline Ready
+                        </span>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-1 shrink-0">
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        light();
+                        soundService.playClick();
+                        setPlaylistModalVideo(video);
+                      }}
+                      className="p-1.5 text-slate-400 hover:text-rose-600 rounded-lg hover:bg-rose-50 transition-colors"
+                      title="Save to Playlist"
+                    >
+                      <ListPlus className="w-4 h-4" />
+                    </button>
+
+                    {isClaimed && (
+                      <CheckCircle className="w-4 h-4 text-emerald-600 shrink-0" />
                     )}
                   </div>
                 </div>
-                {isClaimed && (
-                  <CheckCircle className="w-4 h-4 text-emerald-600 shrink-0" />
-                )}
-              </div>
-            </React.Fragment>
-          );
-        })}
+              </React.Fragment>
+            );
+          })}
         </div>
+
+        {/* Add To Playlist Modal */}
+        {playlistModalVideo && (
+          <AddToPlaylistModal
+            video={playlistModalVideo}
+            playlists={playlists}
+            onPlaylistsChange={(updated) => setPlaylists(updated)}
+            onClose={() => setPlaylistModalVideo(null)}
+          />
+        )}
       </div>
     </div>
   );

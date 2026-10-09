@@ -144,6 +144,8 @@ service cloud.firestore {
         request.resource.data.message is string &&
         request.resource.data.message.size() > 0 &&
         request.resource.data.message.size() <= 1000 &&
+        request.resource.data.package in ['Starter', 'Basic', 'Standard', 'Premium', 'Mega'] &&
+        (!('languageOption' in request.resource.data) || request.resource.data.languageOption in ['English', 'Urdu', 'both']) &&
         request.resource.data.status == 'new' &&
         request.resource.data.createdAt == request.time;
 

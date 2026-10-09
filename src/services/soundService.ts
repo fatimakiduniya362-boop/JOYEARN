@@ -140,8 +140,16 @@ class SoundService {
   }
 
   /**
-   * Cheerful celebratory sound effect triggered exclusively when user reaches their 5-activity daily goal
-   * Ascending bell/harmonic arpeggio (C5 -> E5 -> G5 -> B5 -> C6 -> G6) accompanying confetti
+   * Cheerful success chime (e.g., adding to playlist, successful action)
+   */
+  public playSuccess() {
+    this.playCoin();
+  }
+
+  /**
+   * Unique, playful sound effect that plays exclusively when the user reaches exactly 5/5 activities.
+   * Completely distinguishable from standard 2-tone coin sounds (playCoin):
+   * Features a bouncy cartoon-like spring glissando + bright marimba arpeggio + triumphant victory harmonic swell.
    */
   public playDailyGoalCheer() {
     if (this.isMuted || this.volume <= 0) return;
@@ -149,38 +157,82 @@ class SoundService {
       this.initContext();
       if (!this.ctx) return;
       const now = this.ctx.currentTime;
-      // Cheerful ascending 6-note celebratory arpeggio
-      const notes = [523.25, 659.25, 783.99, 987.77, 1046.50, 1567.98]; // C5, E5, G5, B5, C6, G6
-      notes.forEach((freq, idx) => {
+
+      // 1. Playful "boing-hop" bouncy spring slide (G4 -> C5 -> E5 with rapid playful pitch scoops)
+      const springBounces = [
+        { startFreq: 392.00, endFreq: 523.25, time: 0.00, dur: 0.12 }, // G4 -> C5
+        { startFreq: 440.00, endFreq: 659.25, time: 0.10, dur: 0.14 }, // A4 -> E5
+        { startFreq: 523.25, endFreq: 783.99, time: 0.22, dur: 0.16 }, // C5 -> G5
+        { startFreq: 659.25, endFreq: 1046.50, time: 0.36, dur: 0.22 }, // E5 -> C6
+      ];
+
+      springBounces.forEach((s) => {
         const osc = this.ctx!.createOscillator();
         const gain = this.ctx!.createGain();
-        const startTime = now + idx * 0.085;
-        const isFinal = idx >= notes.length - 2;
-        const duration = isFinal ? 0.65 : 0.28;
+        const t = now + s.time;
 
-        // Alternate sine and triangle for cheerful bell-like texture
-        osc.type = idx % 2 === 0 ? 'sine' : 'triangle';
-        osc.frequency.setValueAtTime(freq, startTime);
+        osc.type = 'triangle';
+        osc.frequency.setValueAtTime(s.startFreq, t);
+        // Playful spring curve: quick dip then rapid leap
+        osc.frequency.exponentialRampToValueAtTime(s.startFreq * 0.92, t + 0.02);
+        osc.frequency.exponentialRampToValueAtTime(s.endFreq, t + s.dur);
 
-        // Gentle cheerful vibrato on the peak note
-        if (isFinal) {
-          osc.frequency.exponentialRampToValueAtTime(freq * 1.015, startTime + 0.15);
-          osc.frequency.exponentialRampToValueAtTime(freq, startTime + 0.35);
-        }
-
-        const peakGain = (isFinal ? 0.18 : 0.12) * this.volume;
-        gain.gain.setValueAtTime(0, startTime);
-        gain.gain.linearRampToValueAtTime(peakGain, startTime + 0.015);
-        gain.gain.exponentialRampToValueAtTime(0.0001, startTime + duration);
+        const peak = 0.14 * this.volume;
+        gain.gain.setValueAtTime(0, t);
+        gain.gain.linearRampToValueAtTime(peak, t + 0.015);
+        gain.gain.exponentialRampToValueAtTime(0.0001, t + s.dur);
 
         osc.connect(gain);
         gain.connect(this.ctx!.destination);
-        osc.start(startTime);
-        osc.stop(startTime + duration);
+        osc.start(t);
+        osc.stop(t + s.dur);
       });
 
-      // Joyful celebratory haptic pulse pattern
-      this.triggerHaptic([70, 50, 90, 50, 160]);
+      // 2. Playful shimmering marimba arpeggio (G5, B5, D6, G6, C7)
+      const sparkleNotes = [783.99, 987.77, 1174.66, 1567.98, 2093.00];
+      sparkleNotes.forEach((freq, idx) => {
+        const osc = this.ctx!.createOscillator();
+        const gain = this.ctx!.createGain();
+        const t = now + 0.45 + idx * 0.06;
+        const dur = idx === sparkleNotes.length - 1 ? 0.55 : 0.22;
+
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(freq, t);
+
+        const peak = (idx === sparkleNotes.length - 1 ? 0.16 : 0.09) * this.volume;
+        gain.gain.setValueAtTime(0, t);
+        gain.gain.linearRampToValueAtTime(peak, t + 0.01);
+        gain.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+
+        osc.connect(gain);
+        gain.connect(this.ctx!.destination);
+        osc.start(t);
+        osc.stop(t + dur);
+      });
+
+      // 3. Warm celebratory victory chord base (C4 + E4 + G4 + C5) at crescendo
+      const baseChord = [261.63, 329.63, 392.00, 523.25];
+      baseChord.forEach((freq) => {
+        const osc = this.ctx!.createOscillator();
+        const gain = this.ctx!.createGain();
+        const t = now + 0.45;
+        const dur = 0.65;
+
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(freq, t);
+
+        gain.gain.setValueAtTime(0, t);
+        gain.gain.linearRampToValueAtTime(0.06 * this.volume, t + 0.04);
+        gain.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+
+        osc.connect(gain);
+        gain.connect(this.ctx!.destination);
+        osc.start(t);
+        osc.stop(t + dur);
+      });
+
+      // Playful bouncy celebratory haptic pattern (distinctive rhythm)
+      this.triggerHaptic([40, 30, 40, 30, 80, 50, 180]);
     } catch {
       // Audio fallback
     }

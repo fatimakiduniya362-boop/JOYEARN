@@ -54,7 +54,7 @@ export interface AppUser {
 export interface VideoContent {
   id: string;
   title: string;
-  category: 'Kids' | 'Education' | 'Cooking' | 'Skills' | 'Crafts' | 'Nature' | 'Stories';
+  category: 'Kids' | 'Education' | 'Cooking' | 'Skills' | 'Crafts' | 'Nature' | 'Stories' | 'Science' | 'Math' | 'Art' | string;
   duration: string;
   points: number;
   author: string;
@@ -64,6 +64,15 @@ export interface VideoContent {
   summary: string;
   videoUrl?: string;
   approved?: boolean;
+}
+
+export interface CustomPlaylist {
+  id: string;
+  name: string;
+  description?: string;
+  videoIds: string[];
+  createdAt: number;
+  emoji?: string;
 }
 
 export type QuizCategory =
@@ -240,6 +249,12 @@ export interface SponsorAd {
   startDate: string; // YYYY-MM-DD
   endDate: string; // YYYY-MM-DD
   isActive: boolean;
+  package?: string; // Starter, Basic, Standard, Premium, Mega
+  packageImpressions?: number;
+  packageMinDays?: number;
+  languageTarget?: 'English' | 'Urdu' | 'both';
+  paid?: 'yes' | 'no';
+  amountPaid?: number; // amount paid in USD
   impressions?: number;
   clicks?: number;
   createdAt?: string;
@@ -253,6 +268,8 @@ export interface SponsorEnquiry {
   email: string;
   phone?: string;
   message: string;
+  package?: string;
+  languageOption?: 'English' | 'Urdu' | 'both';
   createdAt?: any;
   status: 'new' | 'contacted';
 }

@@ -1,5 +1,6 @@
 import { SponsorAd, SponsorEnquiry } from '../types';
 import { getFirestoreDB } from './firestoreService';
+import { getSponsorPackageByName } from '../data/sponsorPackages';
 import {
   collection,
   doc,
@@ -27,6 +28,12 @@ const DEFAULT_SPONSOR_ADS: SponsorAd[] = [
     startDate: '2026-01-01',
     endDate: '2026-12-31',
     isActive: true,
+    package: 'Basic',
+    packageImpressions: 8000,
+    packageMinDays: 14,
+    languageTarget: 'both',
+    paid: 'yes',
+    amountPaid: 15,
     impressions: 48,
     clicks: 6,
     createdAt: new Date().toISOString(),
@@ -41,14 +48,61 @@ const DEFAULT_SPONSOR_ADS: SponsorAd[] = [
     startDate: '2026-01-01',
     endDate: '2026-12-31',
     isActive: true,
+    package: 'Standard',
+    packageImpressions: 25000,
+    packageMinDays: 30,
+    languageTarget: 'both',
+    paid: 'yes',
+    amountPaid: 40,
     impressions: 62,
     clicks: 11,
     createdAt: new Date().toISOString(),
   }
 ];
 
-export async function loadActiveSponsorAds(): Promise<SponsorAd[]> {
+/**
+ * Checks if a sponsor ad is currently qualified to run.
+ * Rules:
+ * 1. Must be marked active (isActive === true)
+ * 2. Paid status must be 'yes'
+ * 3. Destination link must be https://
+ * 4. Must be within schedule window (startDate <= today <= endDate)
+ * 5. Automatically stops once delivered impressions reach package impressions AND minimum days have passed
+ */
+export function isSponsorAdRunning(ad: SponsorAd): boolean {
+  if (!ad.isActive) return false;
+
+  // Ad runs only when paid is 'yes'
+  if (ad.paid && ad.paid !== 'yes') return false;
+
+  // Safe destination link
+  if (!ad.destinationLink?.startsWith('https://')) return false;
+
   const todayStr = new Date().toISOString().slice(0, 10);
+  if (ad.startDate && ad.startDate > todayStr) return false;
+  if (ad.endDate && ad.endDate < todayStr) return false;
+
+  // Determine target impressions & minimum days from package
+  const pkg = ad.package ? getSponsorPackageByName(ad.package) : undefined;
+  const targetImpressions = ad.packageImpressions || pkg?.impressions;
+  const minDays = ad.packageMinDays !== undefined ? ad.packageMinDays : (pkg?.minDays || 0);
+
+  // Check elapsed days since start date or creation date
+  const startMs = ad.startDate ? new Date(ad.startDate).getTime() : (ad.createdAt ? new Date(ad.createdAt).getTime() : Date.now());
+  const nowMs = Date.now();
+  const elapsedDays = Math.max(0, Math.floor((nowMs - startMs) / (1000 * 60 * 60 * 24)));
+
+  const deliveredImpressions = ad.impressions || 0;
+
+  // Automatically stops once delivered impressions reach package impressions AND minimum days have passed
+  if (targetImpressions && deliveredImpressions >= targetImpressions && elapsedDays >= minDays) {
+    return false;
+  }
+
+  return true;
+}
+
+export async function loadActiveSponsorAds(): Promise<SponsorAd[]> {
   const db = getFirestoreDB();
 
   if (db) {
@@ -59,12 +113,7 @@ export async function loadActiveSponsorAds(): Promise<SponsorAd[]> {
       const list: SponsorAd[] = [];
       snap.forEach((d) => {
         const data = d.data() as SponsorAd;
-        // Verify date window and valid https link
-        if (
-          (!data.startDate || data.startDate <= todayStr) &&
-          (!data.endDate || data.endDate >= todayStr) &&
-          data.destinationLink?.startsWith('https://')
-        ) {
+        if (isSponsorAdRunning(data)) {
           list.push(data);
         }
       });
@@ -83,18 +132,12 @@ export async function loadActiveSponsorAds(): Promise<SponsorAd[]> {
     const saved = localStorage.getItem(LOCAL_STORAGE_KEY);
     if (saved) {
       const parsed: SponsorAd[] = JSON.parse(saved);
-      const filtered = parsed.filter(
-        (a) =>
-          a.isActive &&
-          (!a.startDate || a.startDate <= todayStr) &&
-          (!a.endDate || a.endDate >= todayStr) &&
-          a.destinationLink?.startsWith('https://')
-      );
+      const filtered = parsed.filter((a) => isSponsorAdRunning(a));
       if (filtered.length > 0) return filtered;
     }
   } catch {}
 
-  return DEFAULT_SPONSOR_ADS;
+  return DEFAULT_SPONSOR_ADS.filter((a) => isSponsorAdRunning(a));
 }
 
 export async function loadAllSponsorAdsForAdmin(): Promise<SponsorAd[]> {
@@ -251,11 +294,15 @@ export async function submitSponsorEnquiry(
     email: string;
     phone?: string;
     message: string;
+    package?: string;
+    languageOption?: 'English' | 'Urdu' | 'both';
   }
 ): Promise<{ success: boolean; id: string }> {
   const todayStr = new Date().toISOString().slice(0, 10);
   const docId = `${userId}_${todayStr}`;
   const db = getFirestoreDB();
+
+  const packageName = data.package || 'Starter';
 
   const enquiryData: any = {
     id: docId,
@@ -265,9 +312,14 @@ export async function submitSponsorEnquiry(
     email: data.email.trim(),
     phone: data.phone?.trim() || '',
     message: data.message.trim().slice(0, 1000),
+    package: packageName,
     status: 'new',
     createdAt: serverTimestamp(),
   };
+
+  if (data.languageOption) {
+    enquiryData.languageOption = data.languageOption;
+  }
 
   if (db) {
     const docRef = doc(db, 'sponsor_enquiries', docId);
