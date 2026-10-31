@@ -42,6 +42,23 @@ export const StreakLeaderboardModal: React.FC<StreakLeaderboardModalProps> = ({
     if (!isOpen) return;
     let isMounted = true;
 
+    const cacheKey = 'joyearn_streak_leaderboard_cache';
+    const timeKey = 'joyearn_streak_leaderboard_time';
+    const now = Date.now();
+    const CACHE_TTL = 60 * 60 * 1000; // 1-hour cache
+
+    // Check local cache first
+    try {
+      const lastTime = parseInt(localStorage.getItem(timeKey) || '0', 10);
+      if (now - lastTime < CACHE_TTL) {
+        const cached = localStorage.getItem(cacheKey);
+        if (cached) {
+          setRealLearners(JSON.parse(cached));
+          return;
+        }
+      }
+    } catch {}
+
     const fetchStreaks = async () => {
       const db = getFirestoreDB();
       if (!db) return;
@@ -49,7 +66,8 @@ export const StreakLeaderboardModal: React.FC<StreakLeaderboardModalProps> = ({
       try {
         setLoading(true);
         const usersRef = collection(db, 'users');
-        const q = query(usersRef, orderBy('streakDays', 'desc'), limit(10));
+        // Limit strictly to 20 items to preserve free Firebase tier
+        const q = query(usersRef, orderBy('streakDays', 'desc'), limit(20));
         const snap = await getDocs(q);
 
         if (!snap.empty && isMounted) {
@@ -70,6 +88,10 @@ export const StreakLeaderboardModal: React.FC<StreakLeaderboardModalProps> = ({
             });
           });
           setRealLearners(list);
+          try {
+            localStorage.setItem(cacheKey, JSON.stringify(list));
+            localStorage.setItem(timeKey, String(now));
+          } catch {}
         }
       } catch (e) {
         // Handle read permissions or offline mode gracefully

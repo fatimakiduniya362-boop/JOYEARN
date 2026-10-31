@@ -15,50 +15,12 @@ import {
 } from 'firebase/firestore';
 
 const LOCAL_STORAGE_KEY = 'joyearn_sponsor_ads_cache';
+const LOCAL_STORAGE_TIME_KEY = 'joyearn_sponsor_ads_cache_time';
+export const SPONSOR_ADS_CACHE_TTL = 60 * 60 * 1000; // 1-hour TTL
+export const BATCH_IMPRESSIONS_THRESHOLD = 25; // Flush metrics every 25 impressions
 
-// Built-in verified sample sponsor ads (100% compliant with safety guidelines)
-const DEFAULT_SPONSOR_ADS: SponsorAd[] = [
-  {
-    id: 'ad_green_roots',
-    sponsorName: 'EcoFriendly Home & Garden',
-    imageUrl: 'https://images.unsplash.com/photo-1585320806297-9794b3e4eeae?w=600&auto=format&fit=crop&q=80',
-    title: 'Grow Organic Herbs at Home',
-    shortText: 'Discover easy beginner gardening starter kits with eco-safe organic seeds.',
-    destinationLink: 'https://www.worldwildlife.org',
-    startDate: '2026-01-01',
-    endDate: '2026-12-31',
-    isActive: true,
-    package: 'Basic',
-    packageImpressions: 8000,
-    packageMinDays: 14,
-    languageTarget: 'both',
-    paid: 'yes',
-    amountPaid: 15,
-    impressions: 48,
-    clicks: 6,
-    createdAt: new Date().toISOString(),
-  },
-  {
-    id: 'ad_math_olympiad',
-    sponsorName: 'Global Youth STEM Learning',
-    imageUrl: 'https://images.unsplash.com/photo-1509228468518-180dd4864904?w=600&auto=format&fit=crop&q=80',
-    title: 'Free Science & Math Worksheets',
-    shortText: 'Interactive, curriculum-aligned educational puzzle sets for students worldwide.',
-    destinationLink: 'https://www.khanacademy.org',
-    startDate: '2026-01-01',
-    endDate: '2026-12-31',
-    isActive: true,
-    package: 'Standard',
-    packageImpressions: 25000,
-    packageMinDays: 30,
-    languageTarget: 'both',
-    paid: 'yes',
-    amountPaid: 40,
-    impressions: 62,
-    clicks: 11,
-    createdAt: new Date().toISOString(),
-  }
-];
+// Built-in verified sponsor ads: only genuine paid Firestore ads are served
+const DEFAULT_SPONSOR_ADS: SponsorAd[] = [];
 
 /**
  * Checks if a sponsor ad is currently qualified to run.
@@ -102,7 +64,24 @@ export function isSponsorAdRunning(ad: SponsorAd): boolean {
   return true;
 }
 
-export async function loadActiveSponsorAds(): Promise<SponsorAd[]> {
+export async function loadActiveSponsorAds(forceRefresh = false): Promise<SponsorAd[]> {
+  const now = Date.now();
+
+  // 1. One-time read with 1-hour local cache limit
+  if (!forceRefresh) {
+    try {
+      const lastFetched = parseInt(localStorage.getItem(LOCAL_STORAGE_TIME_KEY) || '0', 10);
+      if (now - lastFetched < SPONSOR_ADS_CACHE_TTL) {
+        const saved = localStorage.getItem(LOCAL_STORAGE_KEY);
+        if (saved) {
+          const parsed: SponsorAd[] = JSON.parse(saved);
+          const filtered = parsed.filter((a) => isSponsorAdRunning(a));
+          if (filtered.length > 0) return filtered;
+        }
+      }
+    } catch {}
+  }
+
   const db = getFirestoreDB();
 
   if (db) {
@@ -120,6 +99,7 @@ export async function loadActiveSponsorAds(): Promise<SponsorAd[]> {
 
       if (list.length > 0) {
         localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(list));
+        localStorage.setItem(LOCAL_STORAGE_TIME_KEY, String(now));
         return list;
       }
     } catch (e) {
@@ -238,8 +218,96 @@ export async function deleteSponsorAd(id: string): Promise<boolean> {
   return true;
 }
 
+// ============================================================================
+// 📊 BATCHED AD METRICS (Send once every 25 impressions or when app closes)
+// ============================================================================
+const PENDING_METRICS_KEY = 'joyearn_pending_ad_metrics';
+
+interface PendingMetricsMap {
+  [adId: string]: {
+    impressions: number;
+    clicks: number;
+  };
+}
+
+function getPendingMetrics(): PendingMetricsMap {
+  try {
+    return JSON.parse(localStorage.getItem(PENDING_METRICS_KEY) || '{}');
+  } catch {
+    return {};
+  }
+}
+
+function savePendingMetrics(metrics: PendingMetricsMap) {
+  try {
+    localStorage.setItem(PENDING_METRICS_KEY, JSON.stringify(metrics));
+  } catch {}
+}
+
+/**
+ * Sends all accumulated local impressions and clicks in one batched increment
+ */
+export async function flushPendingAdMetrics(): Promise<void> {
+  const metrics = getPendingMetrics();
+  const adIds = Object.keys(metrics);
+  if (adIds.length === 0) return;
+
+  // Clear local pending map first to avoid duplicate pushes
+  localStorage.removeItem(PENDING_METRICS_KEY);
+
+  const db = getFirestoreDB();
+  if (!db) return;
+
+  try {
+    // Process in batches
+    for (const adId of adIds) {
+      const data = metrics[adId];
+      if (!data) continue;
+      const docRef = doc(db, 'sponsor_ads', adId);
+      const snap = await getDoc(docRef);
+      if (snap.exists()) {
+        const curImpressions = snap.data()?.impressions || 0;
+        const curClicks = snap.data()?.clicks || 0;
+        await updateDoc(docRef, {
+          impressions: curImpressions + (data.impressions || 0),
+          clicks: curClicks + (data.clicks || 0),
+        });
+      }
+    }
+  } catch (err) {
+    console.warn('Could not flush batched ad metrics to Firestore:', err);
+    // Restore unwritten metrics back to localStorage queue
+    try {
+      const current = getPendingMetrics();
+      adIds.forEach((id) => {
+        if (!current[id]) current[id] = { impressions: 0, clicks: 0 };
+        current[id].impressions += metrics[id].impressions;
+        current[id].clicks += metrics[id].clicks;
+      });
+      savePendingMetrics(current);
+    } catch {}
+  }
+}
+
+// Auto flush when window closes or user navigates away
+if (typeof window !== 'undefined') {
+  window.addEventListener('beforeunload', () => {
+    flushPendingAdMetrics();
+  });
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') {
+      flushPendingAdMetrics();
+    }
+  });
+}
+
+/**
+ * Records an ad impression locally, flushing in one batch every 25 impressions
+ */
 export async function recordAdImpression(adId: string): Promise<void> {
-  // Update local
+  if (!adId) return;
+
+  // 1. Update local cache immediately
   try {
     const all = await loadAllSponsorAdsForAdmin();
     const updated = all.map((a) =>
@@ -248,22 +316,31 @@ export async function recordAdImpression(adId: string): Promise<void> {
     localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(updated));
   } catch {}
 
-  // Update Firestore
-  const db = getFirestoreDB();
-  if (db) {
-    try {
-      const docRef = doc(db, 'sponsor_ads', adId);
-      const snap = await getDoc(docRef);
-      if (snap.exists()) {
-        const cur = snap.data()?.impressions || 0;
-        await updateDoc(docRef, { impressions: cur + 1 });
-      }
-    } catch {}
+  // 2. Accumulate in pending batch
+  const pending = getPendingMetrics();
+  if (!pending[adId]) pending[adId] = { impressions: 0, clicks: 0 };
+  pending[adId].impressions += 1;
+  savePendingMetrics(pending);
+
+  // 3. Count total pending impressions
+  const totalPendingImpressions = Object.values(pending).reduce(
+    (sum, m) => sum + (m.impressions || 0),
+    0
+  );
+
+  // Send in ONE batched increment every 25 impressions
+  if (totalPendingImpressions >= BATCH_IMPRESSIONS_THRESHOLD) {
+    flushPendingAdMetrics();
   }
 }
 
+/**
+ * Records an ad click locally
+ */
 export async function recordAdClick(adId: string): Promise<void> {
-  // Update local
+  if (!adId) return;
+
+  // 1. Update local cache immediately
   try {
     const all = await loadAllSponsorAdsForAdmin();
     const updated = all.map((a) =>
@@ -272,18 +349,11 @@ export async function recordAdClick(adId: string): Promise<void> {
     localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(updated));
   } catch {}
 
-  // Update Firestore
-  const db = getFirestoreDB();
-  if (db) {
-    try {
-      const docRef = doc(db, 'sponsor_ads', adId);
-      const snap = await getDoc(docRef);
-      if (snap.exists()) {
-        const cur = snap.data()?.clicks || 0;
-        await updateDoc(docRef, { clicks: cur + 1 });
-      }
-    } catch {}
-  }
+  // 2. Accumulate in pending batch
+  const pending = getPendingMetrics();
+  if (!pending[adId]) pending[adId] = { impressions: 0, clicks: 0 };
+  pending[adId].clicks += 1;
+  savePendingMetrics(pending);
 }
 
 export async function submitSponsorEnquiry(

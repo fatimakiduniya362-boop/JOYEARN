@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { Sparkles, Trophy, RotateCcw, ArrowLeft, Heart, CheckCircle2 } from 'lucide-react';
+import { Sparkles, Trophy, RotateCcw, ArrowLeft, Heart, CheckCircle2, Star, Zap } from 'lucide-react';
+import { LudoGame } from './LudoGame';
 
 interface MiniGamesProps {
   onEarnPoints: (points: number, reason: string) => void;
@@ -11,7 +12,7 @@ interface MiniGamesProps {
 const GARDEN_ITEMS = ['🌸', '🍎', '🦋', '⭐', '🌈', '🌻'];
 
 export const MiniGames: React.FC<MiniGamesProps> = ({ onEarnPoints, onClose, seniorMode }) => {
-  const [activeTab, setActiveTab] = useState<'menu' | 'match' | 'puzzle' | 'memory'>('menu');
+  const [activeTab, setActiveTab] = useState<'menu' | 'ludo' | 'match' | 'puzzle' | 'memory'>('menu');
 
   // Garden Match State
   const [grid, setGrid] = useState<string[]>([]);
@@ -146,6 +147,16 @@ export const MiniGames: React.FC<MiniGamesProps> = ({ onEarnPoints, onClose, sen
     }
   };
 
+  if (activeTab === 'ludo') {
+    return (
+      <LudoGame
+        onEarnPoints={onEarnPoints}
+        onClose={() => setActiveTab('menu')}
+        seniorMode={seniorMode}
+      />
+    );
+  }
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-3">
       <div className="bg-white rounded-3xl w-full max-w-md max-h-[92vh] flex flex-col shadow-2xl overflow-hidden border-4 border-pink-200">
@@ -184,6 +195,40 @@ export const MiniGames: React.FC<MiniGamesProps> = ({ onEarnPoints, onClose, sen
                 <div>
                   <p className="font-bold">Family Play Guarantee</p>
                   <p>No gambling, no real cash betting, no paid loot boxes. Play for fun & eligible reward points!</p>
+                </div>
+              </div>
+
+              {/* FEATURED: JoyLudo Royal (لودو اسٹار) */}
+              <div
+                onClick={() => {
+                  setActiveTab('ludo');
+                }}
+                className="bg-gradient-to-r from-rose-500 via-pink-600 to-amber-500 text-white rounded-3xl p-4 cursor-pointer hover:shadow-xl transition-all shadow-md tap-bounce flex items-center gap-4 relative overflow-hidden group border-2 border-amber-300"
+              >
+                <div className="absolute top-0 right-0 bg-amber-400 text-amber-950 font-black text-[9px] px-3 py-0.5 rounded-bl-xl uppercase tracking-wider shadow-xs">
+                  🔥 Most Popular
+                </div>
+                <div className="w-16 h-16 rounded-2xl bg-white/20 backdrop-blur-xs flex items-center justify-center text-3xl shadow-inner group-hover:scale-110 transition-transform">
+                  🎲
+                </div>
+                <div className="flex-1">
+                  <div className="flex items-center justify-between">
+                    <h3 className="font-black text-white text-base flex items-center gap-1.5">
+                      JoyLudo Royal
+                      <span className="text-xs font-normal opacity-90">(لودو)</span>
+                    </h3>
+                    <span className="text-xs bg-white text-rose-600 px-2.5 py-0.5 rounded-full font-black shadow-xs">
+                      +100 Pts
+                    </span>
+                  </div>
+                  <p className="text-xs text-rose-100 mt-1 line-clamp-1">
+                    {seniorMode
+                      ? 'اصلی لودو: روبوٹ یا دوستوں کے ساتھ کھیلیں اور جیتیں!'
+                      : 'Classic 15x15 Ludo vs Bot AI or Pass & Play with friends!'}
+                  </p>
+                  <span className="inline-block mt-2 text-xs font-black text-amber-200 group-hover:text-white transition-colors">
+                    {seniorMode ? 'کھیلنے کے لیے ٹیپ کریں ←' : 'Tap to Play Ludo →'}
+                  </span>
                 </div>
               </div>
 

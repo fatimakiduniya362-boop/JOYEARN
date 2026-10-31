@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   ShieldCheck,
   CheckCircle2,
@@ -25,11 +25,15 @@ import {
   Phone,
   Inbox,
   Building,
-  Globe
+  Globe,
+  Film,
+  ArrowUp,
+  ArrowDown
 } from 'lucide-react';
 import { WithdrawalRequest, SponsorAd, SponsorEnquiry } from '../types';
 import {
   loadAllWithdrawalsForAdmin,
+  loadPaginatedWithdrawalsForAdmin,
   updateWithdrawalStatus
 } from '../services/firestoreService';
 import {
@@ -38,8 +42,22 @@ import {
   updateSponsorAd,
   deleteSponsorAd,
   loadAllSponsorEnquiriesForAdmin,
-  markSponsorEnquiryContacted
+  markSponsorEnquiryContacted,
+  isSponsorAdRunning
 } from '../services/sponsorAdsService';
+import {
+  AdminVideo,
+  ParsedBulkVideoResult,
+  parseBulkVideoLines,
+  loadAllFirestoreVideos,
+  saveBulkFirestoreVideos,
+  addSingleFirestoreVideo,
+  updateFirestoreVideo,
+  toggleFirestoreVideoApproved,
+  deleteFirestoreVideo,
+  extractYouTubeId
+} from '../services/videoAdminService';
+import { SponsorAdCard } from './SponsorAdCard';
 import {
   getLaunchDateFromFirestore,
   updateLaunchDateInFirestore
@@ -47,8 +65,19 @@ import {
 import {
   OWNER_PERCENT,
   USERS_PERCENT,
-  MONTHLY_PRIZE_POOL_POINTS
-} from '../utils/dailyTasksConfig';
+  PAYOUT_FEE_PERCENT,
+  POOL_CARRY_OVER,
+  POINTS_PER_DOLLAR,
+  MANDATORY_REWARDS_NOTICE,
+  POOL_REVENUE_NOTICE,
+} from '../config/paymentConfig';
+import {
+  loadAllMonthlyRevenues,
+  saveMonthlyNetRevenue,
+  computeMonthlyPoolMetrics,
+  validatePayoutFromPool,
+  calculatePayoutFee,
+} from '../services/monthlyPoolService';
 import { SPONSOR_PACKAGES, getSponsorPackageByName } from '../data/sponsorPackages';
 import { soundService } from '../services/soundService';
 
@@ -70,20 +99,53 @@ export const AdminWithdrawalModal: React.FC<AdminWithdrawalModalProps> = ({
   currentUserEmail,
   seniorMode = false,
 }) => {
-  const [activeAdminTab, setActiveAdminTab] = useState<'withdrawals' | 'sponsor_ads' | 'enquiries' | 'rotation'>('withdrawals');
+  const [activeAdminTab, setActiveAdminTab] = useState<'withdrawals' | 'sponsor_ads' | 'enquiries' | 'videos' | 'rotation'>('withdrawals');
+
+  // Admin Videos State
+  const [adminVideos, setAdminVideos] = useState<AdminVideo[]>([]);
+  const [loadingAdminVideos, setLoadingAdminVideos] = useState(false);
+  const [bulkVideoText, setBulkVideoText] = useState('');
+  const [parsedBulkResults, setParsedBulkResults] = useState<ParsedBulkVideoResult[]>([]);
+  const [adminVideoFilter, setAdminVideoFilter] = useState<string>('All');
+  const [savingBulkVideos, setSavingBulkVideos] = useState(false);
+  const [bulkSaveNotice, setBulkSaveNotice] = useState<string | null>(null);
+
+  // Single Video Add/Edit form state
+  const [showSingleVideoForm, setShowSingleVideoForm] = useState(false);
+  const [editingVideoId, setEditingVideoId] = useState<string | null>(null);
+  const [singleVideoCategory, setSingleVideoCategory] = useState('Science');
+  const [singleVideoTitle, setSingleVideoTitle] = useState('');
+  const [singleVideoLink, setSingleVideoLink] = useState('');
+  const [singleVideoOrder, setSingleVideoOrder] = useState<number>(1);
+
+  // Ad Placement Preview Modal State
+  const [previewAd, setPreviewAd] = useState<SponsorAd | null>(null);
+  const [previewPlacement, setPreviewPlacement] = useState<'home' | 'video_list' | 'quiz'>('home');
 
   // Withdrawals state
   const [requests, setRequests] = useState<WithdrawalRequest[]>([]);
   const [loadingWithdrawals, setLoadingWithdrawals] = useState(true);
+  const [hasMoreWithdrawals, setHasMoreWithdrawals] = useState(false);
+  const [lastWithdrawalCreatedAt, setLastWithdrawalCreatedAt] = useState<string | undefined>(undefined);
+  const [loadingMoreWithdrawals, setLoadingMoreWithdrawals] = useState(false);
   const [filter, setFilter] = useState<'All' | 'Pending' | 'Paid' | 'Rejected'>('Pending');
   const [adminNoteInput, setAdminNoteInput] = useState<Record<string, string>>({});
   const [processingId, setProcessingId] = useState<string | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
 
+  // Monthly Revenue & Pool Management State
+  const [allRevenues, setAllRevenues] = useState<Record<string, number>>({});
+  const [selectedMonth, setSelectedMonth] = useState<string>(() => new Date().toISOString().slice(0, 7));
+  const [netRevenueInput, setNetRevenueInput] = useState<string>('1000');
+  const [savingRevenue, setSavingRevenue] = useState(false);
+  const [revenueSaveNotice, setRevenueSaveNotice] = useState<string | null>(null);
+  const [poolRefusalError, setPoolRefusalError] = useState<string | null>(null);
+
   // Sponsor Ads state
   const [sponsorAds, setSponsorAds] = useState<SponsorAd[]>([]);
   const [loadingAds, setLoadingAds] = useState(false);
   const [showAddAdForm, setShowAddAdForm] = useState(false);
+
   const [editingAdId, setEditingAdId] = useState<string | null>(null);
   const [copiedReport, setCopiedReport] = useState(false);
 
@@ -124,12 +186,25 @@ export const AdminWithdrawalModal: React.FC<AdminWithdrawalModalProps> = ({
     currentUserEmail?.includes('admin') ||
     localStorage.getItem('joyearn_admin_override') === 'true';
 
-  // Fetch withdrawals
+  // Fetch withdrawals with pagination (50 items per query)
   const fetchWithdrawals = async () => {
     setLoadingWithdrawals(true);
-    const data = await loadAllWithdrawalsForAdmin();
-    setRequests(data);
+    const result = await loadPaginatedWithdrawalsForAdmin(50);
+    setRequests(result.requests);
+    setHasMoreWithdrawals(result.hasMore);
+    setLastWithdrawalCreatedAt(result.lastCreatedAt);
     setLoadingWithdrawals(false);
+  };
+
+  const handleLoadMoreWithdrawals = async () => {
+    if (loadingMoreWithdrawals || !hasMoreWithdrawals) return;
+    soundService.playClick();
+    setLoadingMoreWithdrawals(true);
+    const result = await loadPaginatedWithdrawalsForAdmin(50, lastWithdrawalCreatedAt);
+    setRequests((prev) => [...prev, ...result.requests]);
+    setHasMoreWithdrawals(result.hasMore);
+    setLastWithdrawalCreatedAt(result.lastCreatedAt);
+    setLoadingMoreWithdrawals(false);
   };
 
   // Fetch sponsor ads
@@ -156,14 +231,229 @@ export const AdminWithdrawalModal: React.FC<AdminWithdrawalModalProps> = ({
     setLoadingLaunchDate(false);
   };
 
+  // Fetch monthly net revenues
+  const fetchRevenues = async () => {
+    const revs = await loadAllMonthlyRevenues();
+    setAllRevenues(revs);
+    if (revs[selectedMonth] !== undefined) {
+      setNetRevenueInput(String(revs[selectedMonth]));
+    }
+  };
+
+  // Sync net revenue input when selectedMonth changes
+  useEffect(() => {
+    if (allRevenues[selectedMonth] !== undefined) {
+      setNetRevenueInput(String(allRevenues[selectedMonth]));
+    } else {
+      setNetRevenueInput('1000');
+    }
+    setPoolRefusalError(null);
+  }, [selectedMonth, allRevenues]);
+
+  // Fetch admin videos from Firestore
+  const fetchAdminVideos = async () => {
+    setLoadingAdminVideos(true);
+    try {
+      const list = await loadAllFirestoreVideos();
+      setAdminVideos(list);
+    } catch (err) {
+      console.warn('Error fetching admin videos:', err);
+    } finally {
+      setLoadingAdminVideos(false);
+    }
+  };
+
+  // Live parse bulk video lines on input change
+  useEffect(() => {
+    if (!bulkVideoText.trim()) {
+      setParsedBulkResults([]);
+      return;
+    }
+    const results = parseBulkVideoLines(bulkVideoText);
+    setParsedBulkResults(results);
+  }, [bulkVideoText]);
+
+  // Save valid bulk videos to Firestore
+  const handleSaveBulkVideos = async () => {
+    const valid = parsedBulkResults.filter((r) => r.isValid && r.videoId);
+    if (valid.length === 0) {
+      setBulkSaveNotice('No valid video lines found to save. Please fix any red errors in the preview.');
+      return;
+    }
+    setSavingBulkVideos(true);
+    setBulkSaveNotice(null);
+    soundService.playClick();
+    try {
+      const res = await saveBulkFirestoreVideos(
+        valid.map((v, i) => ({
+          category: v.category,
+          title: v.title,
+          videoId: v.videoId!,
+          order: i + 1,
+        }))
+      );
+      soundService.playFanfare();
+      setBulkSaveNotice(`✓ Successfully saved ${res.addedCount} videos to Firestore collection 'videos'!`);
+      setBulkVideoText('');
+      setParsedBulkResults([]);
+      await fetchAdminVideos();
+      setTimeout(() => setBulkSaveNotice(null), 5000);
+    } catch (err: any) {
+      setBulkSaveNotice(`Error saving bulk videos: ${err?.message || 'Firestore write error'}`);
+    } finally {
+      setSavingBulkVideos(false);
+    }
+  };
+
+  // Add or update single video in Firestore
+  const handleSaveSingleVideo = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const vId = extractYouTubeId(singleVideoLink);
+    if (!vId) {
+      alert('Please enter a valid YouTube link or 11-character video ID.');
+      return;
+    }
+    soundService.playClick();
+    try {
+      if (editingVideoId) {
+        await updateFirestoreVideo(editingVideoId, {
+          category: singleVideoCategory.trim(),
+          title: singleVideoTitle.trim(),
+          videoId: vId,
+          order: singleVideoOrder,
+        });
+      } else {
+        await addSingleFirestoreVideo({
+          category: singleVideoCategory.trim(),
+          title: singleVideoTitle.trim(),
+          videoId: vId,
+          order: singleVideoOrder,
+        });
+      }
+      soundService.playFanfare();
+      setShowSingleVideoForm(false);
+      setEditingVideoId(null);
+      setSingleVideoTitle('');
+      setSingleVideoLink('');
+      await fetchAdminVideos();
+    } catch (err: any) {
+      alert(`Error saving video: ${err?.message || 'Write failed'}`);
+    }
+  };
+
+  const handleToggleVideoApproved = async (v: AdminVideo) => {
+    soundService.playClick();
+    const next = await toggleFirestoreVideoApproved(v.id, v.approved !== false);
+    setAdminVideos((prev) => prev.map((item) => (item.id === v.id ? { ...item, approved: next } : item)));
+  };
+
+  const handleDeleteVideo = async (id: string) => {
+    if (!confirm('Are you sure you want to delete this video from Firestore?')) return;
+    soundService.playClick();
+    await deleteFirestoreVideo(id);
+    setAdminVideos((prev) => prev.filter((item) => item.id !== id));
+  };
+
+  const handleMoveVideoOrder = async (index: number, direction: 'up' | 'down') => {
+    const targetIndex = direction === 'up' ? index - 1 : index + 1;
+    if (targetIndex < 0 || targetIndex >= adminVideos.length) return;
+    soundService.playClick();
+
+    const current = adminVideos[index];
+    const target = adminVideos[targetIndex];
+
+    const currentOrder = current.order || index + 1;
+    const targetOrder = target.order || targetIndex + 1;
+
+    await updateFirestoreVideo(current.id, { order: targetOrder });
+    await updateFirestoreVideo(target.id, { order: currentOrder });
+
+    await fetchAdminVideos();
+  };
+
+  // Sponsor Ad Status Badge Helper
+  const getSponsorAdStatusBadge = (ad: SponsorAd) => {
+    const todayStr = new Date().toISOString().slice(0, 10);
+    const pkg = ad.package ? getSponsorPackageByName(ad.package) : undefined;
+    const targetImpressions = ad.packageImpressions || pkg?.impressions;
+    const minDays = ad.packageMinDays !== undefined ? ad.packageMinDays : (pkg?.minDays || 0);
+    const startMs = ad.startDate ? new Date(ad.startDate).getTime() : (ad.createdAt ? new Date(ad.createdAt).getTime() : Date.now());
+    const elapsedDays = Math.max(0, Math.floor((Date.now() - startMs) / (1000 * 60 * 60 * 24)));
+    const delivered = ad.impressions || 0;
+
+    if ((targetImpressions && delivered >= targetImpressions && elapsedDays >= minDays) || (ad.endDate && ad.endDate < todayStr)) {
+      return {
+        status: 'Finished',
+        label: 'Finished',
+        badgeClass: 'bg-purple-950 text-purple-300 border-purple-800',
+      };
+    }
+
+    if (!ad.paid || ad.paid === 'no') {
+      return {
+        status: 'Waiting for payment',
+        label: 'Waiting for payment',
+        badgeClass: 'bg-amber-950 text-amber-300 border-amber-700 animate-pulse',
+      };
+    }
+
+    if (!ad.isActive) {
+      return {
+        status: 'Paused',
+        label: 'Paused',
+        badgeClass: 'bg-slate-800 text-slate-400 border-slate-750',
+      };
+    }
+
+    if (isSponsorAdRunning(ad)) {
+      return {
+        status: 'Running',
+        label: 'Running',
+        badgeClass: 'bg-emerald-950 text-emerald-300 border-emerald-700',
+      };
+    }
+
+    return {
+      status: 'Draft',
+      label: 'Draft',
+      badgeClass: 'bg-blue-950 text-blue-300 border-blue-700',
+    };
+  };
+
   useEffect(() => {
     if (isOpen) {
       fetchWithdrawals();
+      fetchRevenues();
       fetchSponsorAds();
       fetchEnquiries();
       fetchLaunchDate();
+      fetchAdminVideos();
     }
   }, [isOpen]);
+
+  // Handle saving net revenue for selected month (Admin only)
+  const handleSaveNetRevenue = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    const rev = parseFloat(netRevenueInput);
+    if (isNaN(rev) || rev < 0) {
+      setRevenueSaveNotice('Please enter a valid positive revenue amount in USD.');
+      return;
+    }
+    try {
+      setSavingRevenue(true);
+      soundService.playClick();
+      await saveMonthlyNetRevenue(selectedMonth, rev, currentUserEmail || ADMIN_EMAIL);
+      setAllRevenues((prev) => ({ ...prev, [selectedMonth]: rev }));
+      setRevenueSaveNotice(`✓ Saved $${rev.toFixed(2)} USD net revenue for ${selectedMonth}! Users' pool updated.`);
+      setPoolRefusalError(null);
+      soundService.playFanfare();
+      setTimeout(() => setRevenueSaveNotice(null), 3500);
+    } catch (err: any) {
+      setRevenueSaveNotice(err.message || 'Error saving revenue');
+    } finally {
+      setSavingRevenue(false);
+    }
+  };
 
   // Copy helper for sponsor enquiry fields
   const handleCopyEnquiryField = (text: string, key: string) => {
@@ -201,11 +491,27 @@ export const AdminWithdrawalModal: React.FC<AdminWithdrawalModalProps> = ({
   };
 
   // Update withdrawal status (Paid or Rejected with auto points refund)
+  // CRITICAL REQUIREMENT: User payouts are strictly paid from the users' pool (30%)
+  // and NEVER from the owner's share (70%). Refuse if remaining pool would become negative.
   const handleUpdateStatus = async (
     requestId: string,
     newStatus: 'Paid' | 'Rejected'
   ) => {
     soundService.playClick();
+    setPoolRefusalError(null);
+
+    const targetReq = requests.find((r) => r.id === requestId);
+    if (!targetReq) return;
+
+    // STRICT POOL VALIDATION ON PAYOUT
+    if (newStatus === 'Paid') {
+      const validation = validatePayoutFromPool(targetReq, requests, allRevenues);
+      if (!validation.allowed) {
+        setPoolRefusalError(validation.errorMessage || 'Cannot mark as Paid: insufficient users pool balance.');
+        return;
+      }
+    }
+
     setProcessingId(requestId);
     const note =
       adminNoteInput[requestId] ||
@@ -215,6 +521,7 @@ export const AdminWithdrawalModal: React.FC<AdminWithdrawalModalProps> = ({
     soundService.playFanfare();
     setProcessingId(null);
     await fetchWithdrawals();
+    await fetchRevenues();
   };
 
   // Sponsor ad submission (Add or Edit)
@@ -378,32 +685,27 @@ export const AdminWithdrawalModal: React.FC<AdminWithdrawalModalProps> = ({
 
   if (!isOpen) return null;
 
-  // Monthly Financial & Pool Summary Calculations
-  const totalPaidRequests = requests.filter((r) => r.status === 'Paid');
-  const totalPaidPoints = totalPaidRequests.reduce((sum, r) => sum + (r.points || 0), 0);
-  const totalPaidCash = totalPaidRequests.reduce(
-    (sum, r) => sum + (r.cashAmount || (r.points || 0) / 1000),
-    0
-  );
-
-  const totalPendingRequests = requests.filter((r) => r.status === 'Pending');
-  const totalPendingPoints = totalPendingRequests.reduce((sum, r) => sum + (r.points || 0), 0);
-  const totalPendingCash = totalPendingRequests.reduce(
-    (sum, r) => sum + (r.cashAmount || (r.points || 0) / 1000),
-    0
-  );
-
-  // Revenue & Pool split based on OWNER_PERCENT (70%) and USERS_PERCENT (30%)
-  const usersPoolPoints = MONTHLY_PRIZE_POOL_POINTS;
-  const usersPoolDollars = (usersPoolPoints / 1000).toFixed(2);
-  const totalMonthlyAdRevenueEstimate = Math.round(usersPoolPoints / (USERS_PERCENT / 100));
-  const ownerSharePoints = Math.round(totalMonthlyAdRevenueEstimate * (OWNER_PERCENT / 100));
-  const ownerShareDollars = (ownerSharePoints / 1000).toFixed(2);
+  // Monthly Financial & Pool Summary Calculations using computeMonthlyPoolMetrics
+  const monthlyMetrics = computeMonthlyPoolMetrics(selectedMonth, requests, allRevenues);
 
   const filteredRequests = requests.filter((r) => {
     if (filter === 'All') return true;
     return r.status === filter;
   });
+
+  const adminVideoCategories = useMemo(() => {
+    const set = new Set<string>();
+    set.add('All');
+    adminVideos.forEach((v) => {
+      if (v.category) set.add(v.category.trim());
+    });
+    return Array.from(set);
+  }, [adminVideos]);
+
+  const filteredAdminVideos = useMemo(() => {
+    if (adminVideoFilter === 'All') return adminVideos;
+    return adminVideos.filter((v) => v.category === adminVideoFilter);
+  }, [adminVideos, adminVideoFilter]);
 
   return (
     <div className="fixed inset-0 z-70 flex items-center justify-center bg-black/85 backdrop-blur-md p-3 animate-in fade-in duration-200">
@@ -480,7 +782,22 @@ export const AdminWithdrawalModal: React.FC<AdminWithdrawalModalProps> = ({
             }`}
           >
             <Inbox className="w-3.5 h-3.5" />
-            <span>Sponsor Enquiries ({enquiries.length})</span>
+            <span>Enquiries ({enquiries.length})</span>
+          </button>
+
+          <button
+            onClick={() => {
+              soundService.playClick();
+              setActiveAdminTab('videos');
+            }}
+            className={`flex-1 py-3 text-center transition-all flex items-center justify-center gap-1.5 border-b-2 ${
+              activeAdminTab === 'videos'
+                ? 'border-amber-500 text-amber-400 bg-slate-800/90 font-black'
+                : 'border-transparent text-slate-400 hover:text-white'
+            }`}
+          >
+            <Film className="w-3.5 h-3.5" />
+            <span>Videos ({adminVideos.length})</span>
           </button>
 
           <button
@@ -495,54 +812,182 @@ export const AdminWithdrawalModal: React.FC<AdminWithdrawalModalProps> = ({
             }`}
           >
             <Calendar className="w-3.5 h-3.5" />
-            <span>Rotation Launch Date</span>
+            <span>Rotation Date</span>
           </button>
         </div>
 
-        {/* MONTHLY SUMMARY METRICS CARD (Always visible or on Withdrawals tab) */}
-        <div className="p-3 bg-gradient-to-r from-slate-900 via-slate-850 to-slate-900 border-b border-slate-800 shrink-0">
+        {/* MONTHLY POOL & NET REVENUE CONTROLS (Always visible in Admin portal) */}
+        <div className="p-3 bg-gradient-to-r from-slate-900 via-slate-850 to-slate-900 border-b border-slate-800 shrink-0 space-y-2.5">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            {/* Month Selector */}
+            <div className="flex items-center gap-2">
+              <Calendar className="w-4 h-4 text-amber-400 shrink-0" />
+              <label className="text-[11px] font-black text-slate-300 uppercase">
+                Active Month:
+              </label>
+              <input
+                type="month"
+                value={selectedMonth}
+                onChange={(e) => {
+                  soundService.playClick();
+                  setSelectedMonth(e.target.value);
+                }}
+                className="bg-slate-950 border border-slate-700 rounded-lg px-2 py-1 text-xs font-mono font-bold text-amber-300 focus:outline-hidden focus:border-amber-500"
+              />
+              <button
+                type="button"
+                onClick={() => {
+                  soundService.playClick();
+                  setSelectedMonth(new Date().toISOString().slice(0, 7));
+                }}
+                className="text-[10px] px-2 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-md font-bold tap-bounce"
+              >
+                Current
+              </button>
+            </div>
+
+            {/* Net Revenue Input Form for this month */}
+            <form onSubmit={handleSaveNetRevenue} className="flex items-center gap-1.5 flex-1 sm:justify-end">
+              <span className="text-[11px] text-slate-300 font-bold whitespace-nowrap">Net Revenue:</span>
+              <div className="relative flex items-center">
+                <span className="absolute left-2 text-xs text-slate-400 font-mono">$</span>
+                <input
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  value={netRevenueInput}
+                  onChange={(e) => setNetRevenueInput(e.target.value)}
+                  placeholder="0.00"
+                  className="w-24 pl-5 pr-2 py-1 bg-slate-950 border border-slate-700 rounded-lg text-xs font-mono font-bold text-white focus:outline-hidden focus:border-amber-500"
+                />
+              </div>
+              <button
+                type="submit"
+                disabled={savingRevenue}
+                className="px-2.5 py-1 bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-slate-950 font-black text-xs rounded-lg flex items-center gap-1 tap-bounce shadow-xs transition-all"
+                title="Save Net Revenue for this month"
+              >
+                <Save className="w-3.5 h-3.5" />
+                <span>{savingRevenue ? 'Saving...' : 'Set'}</span>
+              </button>
+            </form>
+          </div>
+
+          {/* Revenue Save Success or Error feedback */}
+          {revenueSaveNotice && (
+            <div className="text-[10.5px] font-bold text-amber-300 bg-amber-950/40 border border-amber-600/40 px-2.5 py-1 rounded-lg">
+              {revenueSaveNotice}
+            </div>
+          )}
+
+          {/* 8 CRITICAL MONTHLY POOL METRICS CARDS */}
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-center text-xs">
-            {/* Total Paid */}
+            {/* 1. Net revenue entered */}
             <div className="bg-slate-800/90 p-2 rounded-xl border border-slate-700/80">
-              <span className="text-[10px] text-slate-400 uppercase font-black block">Total Paid</span>
-              <strong className="text-emerald-400 text-xs block font-mono">
-                ${totalPaidCash.toFixed(2)}
+              <span className="text-[9.5px] text-slate-400 uppercase font-black block">Funds Received</span>
+              <strong className="text-white text-xs block font-mono">
+                ${monthlyMetrics.fundsReceived.toFixed(2)}
               </strong>
-              <span className="text-[9.5px] text-slate-500">{totalPaidPoints.toLocaleString()} Pts</span>
+              <span className="text-[9px] text-slate-500">Entered by admin</span>
             </div>
 
-            {/* Total Pending */}
+            {/* 2. Owner share (70%) */}
             <div className="bg-slate-800/90 p-2 rounded-xl border border-slate-700/80">
-              <span className="text-[10px] text-slate-400 uppercase font-black block">Total Pending</span>
-              <strong className="text-amber-400 text-xs block font-mono">
-                ${totalPendingCash.toFixed(2)}
-              </strong>
-              <span className="text-[9.5px] text-slate-500">{totalPendingPoints.toLocaleString()} Pts</span>
-            </div>
-
-            {/* Owner's Share (70%) */}
-            <div className="bg-slate-800/90 p-2 rounded-xl border border-slate-700/80">
-              <span className="text-[10px] text-purple-300 uppercase font-black block">
-                Owner Share ({OWNER_PERCENT}%)
+              <span className="text-[9.5px] text-purple-300 uppercase font-black block">
+                Owner ({OWNER_PERCENT}%)
               </span>
               <strong className="text-purple-400 text-xs block font-mono">
-                ~${ownerShareDollars}
+                ${monthlyMetrics.ownerShare.toFixed(2)}
               </strong>
-              <span className="text-[9.5px] text-slate-500">{ownerSharePoints.toLocaleString()} Pts</span>
+              <span className="text-[9px] text-slate-500">App maintenance</span>
             </div>
 
-            {/* Users' Pool (30%) */}
+            {/* 3. Users' pool (30%) */}
             <div className="bg-slate-800/90 p-2 rounded-xl border border-slate-700/80">
-              <span className="text-[10px] text-cyan-300 uppercase font-black block">
+              <span className="text-[9.5px] text-cyan-300 uppercase font-black block">
                 Users' Pool ({USERS_PERCENT}%)
               </span>
               <strong className="text-cyan-400 text-xs block font-mono">
-                ~${usersPoolDollars}
+                ${monthlyMetrics.usersPool.toFixed(2)}
               </strong>
-              <span className="text-[9.5px] text-slate-500">{usersPoolPoints.toLocaleString()} Pts</span>
+              <span className="text-[9px] text-slate-500">Monthly allocation</span>
+            </div>
+
+            {/* 4. Carried-over balance */}
+            <div className="bg-slate-800/90 p-2 rounded-xl border border-slate-700/80">
+              <span className="text-[9.5px] text-blue-300 uppercase font-black block">
+                Carried Over
+              </span>
+              <strong className="text-blue-400 text-xs block font-mono">
+                ${monthlyMetrics.carriedOver.toFixed(2)}
+              </strong>
+              <span className="text-[9px] text-slate-500">{POOL_CARRY_OVER ? 'From prior months' : 'Carry disabled'}</span>
+            </div>
+
+            {/* 5. Total Available Pool */}
+            <div className="bg-slate-800/90 p-2 rounded-xl border border-cyan-700/60 bg-cyan-950/20">
+              <span className="text-[9.5px] text-cyan-300 uppercase font-black block">Total Avail Pool</span>
+              <strong className="text-cyan-300 text-xs block font-mono">
+                ${monthlyMetrics.totalAvailablePool.toFixed(2)}
+              </strong>
+              <span className="text-[9px] text-slate-400">Pool + Carried</span>
+            </div>
+
+            {/* 6. Total Paid */}
+            <div className="bg-slate-800/90 p-2 rounded-xl border border-slate-700/80">
+              <span className="text-[9.5px] text-emerald-400 uppercase font-black block">Total Paid</span>
+              <strong className="text-emerald-400 text-xs block font-mono">
+                ${monthlyMetrics.totalPaid.toFixed(2)}
+              </strong>
+              <span className="text-[9px] text-slate-500">From users pool</span>
+            </div>
+
+            {/* 7. Total Pending */}
+            <div className="bg-slate-800/90 p-2 rounded-xl border border-slate-700/80">
+              <span className="text-[9.5px] text-amber-300 uppercase font-black block">Total Pending</span>
+              <strong className="text-amber-400 text-xs block font-mono">
+                ${monthlyMetrics.totalPending.toFixed(2)}
+              </strong>
+              <span className="text-[9px] text-slate-500">Awaiting review</span>
+            </div>
+
+            {/* 8. Remaining Pool Balance */}
+            <div className={`p-2 rounded-xl border ${
+              monthlyMetrics.remainingPool > 0
+                ? 'bg-emerald-950/30 border-emerald-500/60'
+                : 'bg-rose-950/40 border-rose-500/80'
+            }`}>
+              <span className="text-[9.5px] uppercase font-black block text-slate-300">Remaining Pool</span>
+              <strong className={`text-xs block font-mono ${
+                monthlyMetrics.remainingPool > 0 ? 'text-emerald-400' : 'text-rose-400'
+              }`}>
+                ${monthlyMetrics.remainingPool.toFixed(2)}
+              </strong>
+              <span className="text-[9px] text-slate-400">
+                {monthlyMetrics.remainingPool > 0 ? 'Solvent' : 'Exhausted'}
+              </span>
             </div>
           </div>
         </div>
+
+        {/* POOL REFUSAL WARNING BANNER */}
+        {poolRefusalError && (
+          <div className="p-3 bg-red-950/90 border-b border-red-500 flex items-start gap-2.5 text-xs text-red-200 shrink-0 animate-in fade-in">
+            <AlertTriangle className="w-5 h-5 text-red-400 shrink-0 mt-0.5" />
+            <div className="flex-1 space-y-1">
+              <div className="flex items-center justify-between">
+                <strong className="text-white font-black">PAYOUT REFUSED: INSUFFICIENT USERS' POOL</strong>
+                <button
+                  onClick={() => setPoolRefusalError(null)}
+                  className="text-red-400 hover:text-white text-xs font-bold px-1.5 py-0.5 rounded-md hover:bg-red-900 tap-bounce"
+                >
+                  ✕ Dismiss
+                </button>
+              </div>
+              <p className="text-[11px] leading-relaxed">{poolRefusalError}</p>
+            </div>
+          </div>
+        )}
 
         {/* TAB 1: WITHDRAWALS CONTENT */}
         {activeAdminTab === 'withdrawals' && (
@@ -591,130 +1036,181 @@ export const AdminWithdrawalModal: React.FC<AdminWithdrawalModalProps> = ({
                   <p className="text-xs font-bold">No {filter} requests found.</p>
                 </div>
               ) : (
-                filteredRequests.map((req) => (
-                  <div
-                    key={req.id}
-                    className="bg-slate-800/90 border border-slate-700 rounded-2xl p-3.5 space-y-3 shadow-md"
-                  >
-                    {/* Header: User, ID, Amount */}
-                    <div className="flex items-start justify-between">
-                      <div>
-                        <div className="flex items-center gap-2">
-                          <span className="font-black text-xs text-white">
-                            {req.userName || req.accountName || 'Learner'}
+                filteredRequests.map((req) => {
+                  const feeDetails = calculatePayoutFee(req.cashAmount || (req.points || 0) / POINTS_PER_DOLLAR);
+                  const isPending = req.status === 'Pending';
+                  const exceedsAvailablePool = isPending && feeDetails.gross > monthlyMetrics.remainingPool;
+
+                  return (
+                    <div
+                      key={req.id}
+                      className="bg-slate-800/90 border border-slate-700 rounded-2xl p-3.5 space-y-3 shadow-md"
+                    >
+                      {/* Header: User, ID, Amount */}
+                      <div className="flex items-start justify-between gap-2">
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <span className="font-black text-xs text-white">
+                              {req.userName || req.accountName || 'Learner'}
+                            </span>
+                            <span
+                              className={`text-[9px] font-black px-2 py-0.5 rounded-full uppercase ${
+                                req.status === 'Paid'
+                                  ? 'bg-emerald-950 text-emerald-400 border border-emerald-700'
+                                  : req.status === 'Rejected'
+                                  ? 'bg-rose-950 text-rose-400 border border-rose-700'
+                                  : 'bg-amber-950 text-amber-400 border border-amber-700'
+                              }`}
+                            >
+                              {req.status}
+                            </span>
+                          </div>
+                          <p className="text-[10px] text-slate-400 font-mono mt-0.5">
+                            {req.userEmail || 'No email provided'} • {new Date(req.createdAt).toLocaleDateString()}
+                          </p>
+                        </div>
+
+                        {/* Amount breakdown: Gross, Transfer Fee (2%), Net to Send */}
+                        <div className="text-right shrink-0">
+                          <span className="text-xs font-black text-amber-400 block font-mono">
+                            {req.points.toLocaleString()} Pts
                           </span>
-                          <span
-                            className={`text-[9px] font-black px-2 py-0.5 rounded-full uppercase ${
-                              req.status === 'Paid'
-                                ? 'bg-emerald-950 text-emerald-400 border border-emerald-700'
-                                : req.status === 'Rejected'
-                                ? 'bg-rose-950 text-rose-400 border border-rose-700'
-                                : 'bg-amber-950 text-amber-400 border border-amber-700'
-                            }`}
+                          <div className="text-[10px] space-y-0.5 mt-0.5 font-mono">
+                            <div className="text-slate-300">
+                              Gross: <strong className="text-white">${feeDetails.gross.toFixed(2)}</strong>
+                            </div>
+                            <div className="text-amber-400">
+                              Fee ({PAYOUT_FEE_PERCENT}%): <strong>-${feeDetails.feeAmount.toFixed(2)}</strong>
+                            </div>
+                            <div className="text-emerald-400 font-bold border-t border-slate-700/60 pt-0.5">
+                              Net: <strong>${feeDetails.netAmount.toFixed(2)} USD</strong>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Payment Method & Details Box with Copy Button */}
+                      <div className="bg-slate-900/90 p-3 rounded-xl border border-slate-750 text-xs space-y-1.5">
+                        <div className="flex justify-between items-center text-[11px]">
+                          <span className="text-slate-400">Payment Method:</span>
+                          <strong className="text-white px-2 py-0.5 rounded-md bg-slate-800 font-mono">
+                            {req.paymentMethod || 'Easypaisa'}
+                          </strong>
+                        </div>
+
+                        {/* Account Details with Copy Button */}
+                        <div className="flex justify-between items-center text-[11px] bg-slate-950/70 p-2 rounded-lg border border-slate-800">
+                          <div className="min-w-0 pr-2">
+                            <span className="text-slate-400 block text-[9.5px]">Account Details / Number:</span>
+                            <span className="text-amber-300 font-mono font-bold select-all break-all text-xs">
+                              {req.accountDetails || 'N/A'}
+                            </span>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => handleCopyAccountDetails(req.accountDetails || '', req.id)}
+                            className="shrink-0 px-2.5 py-1 bg-amber-500 hover:bg-amber-400 text-slate-950 text-[10px] font-black rounded-lg flex items-center gap-1 shadow-2xs tap-bounce transition-all"
+                            title="Copy account details to clipboard"
                           >
-                            {req.status}
+                            {copiedId === req.id ? (
+                              <>
+                                <Check className="w-3 h-3 text-slate-950" />
+                                <span>Copied!</span>
+                              </>
+                            ) : (
+                              <>
+                                <Copy className="w-3 h-3 text-slate-950" />
+                                <span>Copy</span>
+                              </>
+                            )}
+                          </button>
+                        </div>
+
+                        <div className="flex justify-between text-[11px]">
+                          <span className="text-slate-400">Account Holder Title:</span>
+                          <strong className="text-white">{req.accountName || 'N/A'}</strong>
+                        </div>
+
+                        {/* Fee notice note */}
+                        <div className="text-[9.5px] text-slate-400 italic">
+                          ℹ️ Transfer fee of {PAYOUT_FEE_PERCENT}% (${feeDetails.feeAmount.toFixed(2)}) is deducted from user payout (never from owner share).
+                        </div>
+
+                        {req.adminNote && (
+                          <div className="text-[10px] text-slate-400 pt-1 border-t border-slate-800">
+                            <strong>Admin Note:</strong> {req.adminNote}
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Insufficient Pool Warning for this Request */}
+                      {exceedsAvailablePool && (
+                        <div className="p-2.5 bg-rose-950/60 border border-rose-500/70 rounded-xl text-[10.5px] text-rose-200 flex items-start gap-1.5 font-bold">
+                          <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
+                          <span>
+                            Payout Refused by Rule: Gross ${feeDetails.gross.toFixed(2)} USD exceeds the remaining users' pool ($${monthlyMetrics.remainingPool.toFixed(2)} USD). You must enter higher net revenue above to pay this user.
                           </span>
                         </div>
-                        <p className="text-[10px] text-slate-400 font-mono mt-0.5">
-                          {req.userEmail || 'No email provided'} • {new Date(req.createdAt).toLocaleDateString()}
-                        </p>
-                      </div>
+                      )}
 
-                      <div className="text-right">
-                        <span className="text-xs font-black text-amber-400 block">
-                          {req.points.toLocaleString()} Pts
-                        </span>
-                        <span className="text-[11px] font-bold text-emerald-400">
-                          ${req.cashAmount ? req.cashAmount.toFixed(2) : (req.points / 1000).toFixed(2)} USD
-                        </span>
-                      </div>
-                    </div>
+                      {/* Actions for Pending Requests */}
+                      {req.status === 'Pending' && (
+                        <div className="space-y-2 pt-1 border-t border-slate-700/60">
+                          <input
+                            type="text"
+                            placeholder="Optional admin note / transaction reference..."
+                            value={adminNoteInput[req.id] || ''}
+                            onChange={(e) =>
+                              setAdminNoteInput({ ...adminNoteInput, [req.id]: e.target.value })
+                            }
+                            className="w-full px-2.5 py-1.5 bg-slate-900 border border-slate-700 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-hidden focus:border-amber-500"
+                          />
 
-                    {/* Payment Method & Details Box with Copy Button */}
-                    <div className="bg-slate-900/90 p-3 rounded-xl border border-slate-750 text-xs space-y-1.5">
-                      <div className="flex justify-between items-center text-[11px]">
-                        <span className="text-slate-400">Payment Method:</span>
-                        <strong className="text-white px-2 py-0.5 rounded-md bg-slate-800 font-mono">
-                          {req.paymentMethod || 'Easypaisa'}
-                        </strong>
-                      </div>
+                          <div className="grid grid-cols-2 gap-2">
+                            <button
+                              onClick={() => handleUpdateStatus(req.id, 'Paid')}
+                              disabled={processingId === req.id || exceedsAvailablePool}
+                              className="py-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 disabled:cursor-not-allowed text-white font-black rounded-xl text-xs tap-bounce flex items-center justify-center gap-1.5 shadow-sm"
+                              title={exceedsAvailablePool ? 'Refused: Insufficient users pool balance' : 'Mark as Paid'}
+                            >
+                              <CheckCircle2 className="w-3.5 h-3.5" />
+                              <span>{processingId === req.id ? 'Processing...' : 'Mark as Paid ✓'}</span>
+                            </button>
 
-                      {/* Account Details with Copy Button */}
-                      <div className="flex justify-between items-center text-[11px] bg-slate-950/70 p-2 rounded-lg border border-slate-800">
-                        <div className="min-w-0 pr-2">
-                          <span className="text-slate-400 block text-[9.5px]">Account Details / Number:</span>
-                          <span className="text-amber-300 font-mono font-bold select-all break-all text-xs">
-                            {req.accountDetails || 'N/A'}
-                          </span>
-                        </div>
-                        <button
-                          type="button"
-                          onClick={() => handleCopyAccountDetails(req.accountDetails || '', req.id)}
-                          className="shrink-0 px-2.5 py-1 bg-amber-500 hover:bg-amber-400 text-slate-950 text-[10px] font-black rounded-lg flex items-center gap-1 shadow-2xs tap-bounce transition-all"
-                          title="Copy account details to clipboard"
-                        >
-                          {copiedId === req.id ? (
-                            <>
-                              <Check className="w-3 h-3 text-slate-950" />
-                              <span>Copied!</span>
-                            </>
-                          ) : (
-                            <>
-                              <Copy className="w-3 h-3 text-slate-950" />
-                              <span>Copy</span>
-                            </>
-                          )}
-                        </button>
-                      </div>
-
-                      <div className="flex justify-between text-[11px]">
-                        <span className="text-slate-400">Account Holder Title:</span>
-                        <strong className="text-white">{req.accountName || 'N/A'}</strong>
-                      </div>
-
-                      {req.adminNote && (
-                        <div className="text-[10px] text-slate-400 pt-1 border-t border-slate-800">
-                          <strong>Admin Note:</strong> {req.adminNote}
+                            <button
+                              onClick={() => handleUpdateStatus(req.id, 'Rejected')}
+                              disabled={processingId === req.id}
+                              className="py-2 bg-rose-600 hover:bg-rose-700 text-white font-black rounded-xl text-xs tap-bounce flex items-center justify-center gap-1.5 shadow-sm"
+                            >
+                              <XCircle className="w-3.5 h-3.5" />
+                              <span>{processingId === req.id ? 'Refunding...' : 'Reject & Refund Points'}</span>
+                            </button>
+                          </div>
                         </div>
                       )}
                     </div>
+                  );
+                })
+              )}
 
-                    {/* Actions for Pending Requests */}
-                    {req.status === 'Pending' && (
-                      <div className="space-y-2 pt-1 border-t border-slate-700/60">
-                        <input
-                          type="text"
-                          placeholder="Optional admin note / transaction reference..."
-                          value={adminNoteInput[req.id] || ''}
-                          onChange={(e) =>
-                            setAdminNoteInput({ ...adminNoteInput, [req.id]: e.target.value })
-                          }
-                          className="w-full px-2.5 py-1.5 bg-slate-900 border border-slate-700 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-hidden focus:border-amber-500"
-                        />
-
-                        <div className="grid grid-cols-2 gap-2">
-                          <button
-                            onClick={() => handleUpdateStatus(req.id, 'Paid')}
-                            disabled={processingId === req.id}
-                            className="py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-black rounded-xl text-xs tap-bounce flex items-center justify-center gap-1.5 shadow-sm"
-                          >
-                            <CheckCircle2 className="w-3.5 h-3.5" />
-                            <span>Mark as Paid ✓</span>
-                          </button>
-
-                          <button
-                            onClick={() => handleUpdateStatus(req.id, 'Rejected')}
-                            disabled={processingId === req.id}
-                            className="py-2 bg-rose-600 hover:bg-rose-700 text-white font-black rounded-xl text-xs tap-bounce flex items-center justify-center gap-1.5 shadow-sm"
-                          >
-                            <XCircle className="w-3.5 h-3.5" />
-                            <span>Reject & Refund Points</span>
-                          </button>
-                        </div>
-                      </div>
+              {/* Paginated Load More Button */}
+              {hasMoreWithdrawals && !loadingWithdrawals && (
+                <div className="pt-2 pb-1 text-center">
+                  <button
+                    onClick={handleLoadMoreWithdrawals}
+                    disabled={loadingMoreWithdrawals}
+                    className="w-full py-2.5 px-4 bg-slate-800 hover:bg-slate-700 text-amber-400 font-black rounded-xl text-xs tap-bounce border border-slate-700 flex items-center justify-center gap-2 shadow-sm"
+                  >
+                    {loadingMoreWithdrawals ? (
+                      <>
+                        <RefreshCw className="w-3.5 h-3.5 animate-spin text-amber-400" />
+                        <span>Loading more requests...</span>
+                      </>
+                    ) : (
+                      <span>Load more requests (50) ↓</span>
                     )}
-                  </div>
-                ))
+                  </button>
+                </div>
               )}
             </div>
           </div>
@@ -1078,30 +1574,33 @@ export const AdminWithdrawalModal: React.FC<AdminWithdrawalModalProps> = ({
                               </span>
                             </td>
                             <td className="py-2.5">
-                              {isCompleted ? (
-                                <span className="text-[9px] font-black px-2 py-0.5 rounded-full uppercase bg-purple-950 text-purple-300 border border-purple-800 block text-center max-w-[110px]" title="Delivered target reached & min days elapsed. Campaign stopped automatically.">
-                                  Completed (Stopped)
-                                </span>
-                              ) : ad.paid !== 'yes' ? (
-                                <span className="text-[9px] font-black px-2 py-0.5 rounded-full uppercase bg-rose-950 text-rose-400 border border-rose-800 block text-center max-w-[110px]" title="Campaign will only run once paid is marked Yes">
-                                  Unpaid (Paused)
-                                </span>
-                              ) : (
-                                <button
-                                  type="button"
-                                  onClick={() => handleToggleAdStatus(ad)}
-                                  className={`text-[9px] font-black px-2 py-0.5 rounded-full uppercase cursor-pointer ${
-                                    ad.isActive
-                                      ? 'bg-emerald-950 text-emerald-400 border border-emerald-700'
-                                      : 'bg-slate-700 text-slate-400 border border-slate-600'
-                                  }`}
-                                  title="Click to toggle active / paused"
-                                >
-                                  {ad.isActive ? 'Active (Running)' : 'Paused'}
-                                </button>
-                              )}
+                              {(() => {
+                                const badge = getSponsorAdStatusBadge(ad);
+                                return (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleToggleAdStatus(ad)}
+                                    className={`text-[9.5px] font-black px-2.5 py-0.5 rounded-full uppercase border cursor-pointer tap-bounce block text-center max-w-[130px] ${badge.badgeClass}`}
+                                    title="Status: Draft, Waiting for payment, Running, Finished, Paused (Click to toggle)"
+                                  >
+                                    {badge.label}
+                                  </button>
+                                );
+                              })()}
                             </td>
                             <td className="py-2.5 text-right space-x-1 whitespace-nowrap">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  soundService.playClick();
+                                  setPreviewAd(ad);
+                                  setPreviewPlacement('home');
+                                }}
+                                className="p-1 bg-sky-950 hover:bg-sky-900 border border-sky-800 rounded text-sky-300 hover:text-white"
+                                title="Preview ad in Home, Video list & Quiz placements"
+                              >
+                                <Eye className="w-3 h-3" />
+                              </button>
                               <button
                                 type="button"
                                 onClick={() => handleCopySponsorReport(ad)}
@@ -1347,6 +1846,407 @@ export const AdminWithdrawalModal: React.FC<AdminWithdrawalModalProps> = ({
           </div>
         )}
 
+        {/* TAB: VIDEOS MANAGEMENT */}
+        {activeAdminTab === 'videos' && (
+          <div className="flex-1 overflow-y-auto p-4 space-y-4">
+            {/* Header / Actions Bar */}
+            <div className="bg-slate-800/90 border border-slate-700 rounded-2xl p-4 space-y-3.5">
+              <div className="flex items-center justify-between gap-2 border-b border-slate-700 pb-3 flex-wrap">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-9 h-9 rounded-xl bg-pink-500/20 text-pink-400 flex items-center justify-center text-lg">
+                    🎬
+                  </div>
+                  <div>
+                    <h4 className="font-black text-sm text-white">Curated Learning Videos</h4>
+                    <p className="text-[11px] text-slate-400">
+                      Firestore collection <code>videos</code> ({adminVideos.length} custom videos)
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      soundService.playClick();
+                      setShowSingleVideoForm(!showSingleVideoForm);
+                      setEditingVideoId(null);
+                      setSingleVideoTitle('');
+                      setSingleVideoLink('');
+                    }}
+                    className="px-3 py-1.5 bg-pink-600 hover:bg-pink-500 text-white rounded-xl text-xs font-bold flex items-center gap-1 tap-bounce shadow-xs"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    <span>{showSingleVideoForm ? 'Close Form' : 'Add Video'}</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={fetchAdminVideos}
+                    disabled={loadingAdminVideos}
+                    className="px-3 py-1.5 bg-slate-700 hover:bg-slate-600 rounded-xl text-xs font-bold text-slate-200 flex items-center gap-1.5 tap-bounce"
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 ${loadingAdminVideos ? 'animate-spin' : ''}`} />
+                    <span>Refresh</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* SECTION 1: BULK ADD VIDEOS TEXT BOX */}
+              <div className="bg-slate-900/90 border border-slate-750 p-3.5 rounded-2xl space-y-3">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h5 className="font-black text-xs text-white uppercase tracking-wider flex items-center gap-1.5">
+                      <span>Bulk Add Videos</span>
+                      <span className="text-[10px] text-pink-400 bg-pink-950/60 border border-pink-700 px-2 py-0.2 rounded-full font-mono">
+                        category | title | YouTube link
+                      </span>
+                    </h5>
+                    <p className="text-[11px] text-slate-400 mt-0.5">
+                      Paste many lines below. Video ID and thumbnail will be automatically extracted from any YouTube URL format.
+                    </p>
+                  </div>
+                </div>
+
+                <textarea
+                  rows={4}
+                  value={bulkVideoText}
+                  onChange={(e) => setBulkVideoText(e.target.value)}
+                  placeholder={`Science | Solar System & Space Exploration | https://www.youtube.com/watch?v=libKVRa01L8\nArts | 3D Origami Cube Craft | https://youtu.be/cScuMgYHKeM\nCooking | How to Grow Home Organic Mint | https://www.youtube.com/watch?v=B0DrWAUsNSc\nNature | Rainforest Ecosystems Documentary | https://www.youtube.com/watch?v=3vijLre760w`}
+                  className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs font-mono text-white placeholder-slate-600 focus:outline-hidden focus:border-pink-500 resize-none leading-relaxed"
+                />
+
+                {/* Bulk Save Feedback Notice */}
+                {bulkSaveNotice && (
+                  <div className="p-2.5 rounded-xl bg-slate-800 border border-pink-500/50 text-xs font-bold text-pink-300">
+                    {bulkSaveNotice}
+                  </div>
+                )}
+
+                {/* LIVE PREVIEW TABLE WITH TICK OR ERROR FOR EACH LINE */}
+                {parsedBulkResults.length > 0 && (
+                  <div className="space-y-2 pt-1 border-t border-slate-800">
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="font-bold text-slate-300">
+                        Live Preview ({parsedBulkResults.filter((r) => r.isValid).length} valid / {parsedBulkResults.length} total)
+                      </span>
+                      <button
+                        type="button"
+                        onClick={handleSaveBulkVideos}
+                        disabled={savingBulkVideos || parsedBulkResults.filter((r) => r.isValid).length === 0}
+                        className="px-3.5 py-1.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 disabled:opacity-50 text-white font-black rounded-xl text-xs flex items-center gap-1.5 shadow-md tap-bounce"
+                      >
+                        {savingBulkVideos ? (
+                          <>
+                            <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                            <span>Saving to Cloud...</span>
+                          </>
+                        ) : (
+                          <>
+                            <Check className="w-3.5 h-3.5" />
+                            <span>Save Valid Videos to Cloud ({parsedBulkResults.filter((r) => r.isValid).length})</span>
+                          </>
+                        )}
+                      </button>
+                    </div>
+
+                    <div className="overflow-x-auto max-h-48 rounded-xl border border-slate-700/80 bg-slate-950/60 scrollbar-thin">
+                      <table className="w-full text-left text-xs">
+                        <thead className="bg-slate-900 text-slate-400 font-bold border-b border-slate-800 text-[10px] uppercase">
+                          <tr>
+                            <th className="p-2">Line</th>
+                            <th className="p-2">Status</th>
+                            <th className="p-2">Category</th>
+                            <th className="p-2">Title</th>
+                            <th className="p-2">Video ID</th>
+                            <th className="p-2">Thumb</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-850 font-mono text-[11px]">
+                          {parsedBulkResults.map((item) => (
+                            <tr
+                              key={item.lineIndex}
+                              className={item.isValid ? 'hover:bg-slate-900/50' : 'bg-red-950/20 text-red-300'}
+                            >
+                              <td className="p-2 font-bold text-slate-400">#{item.lineIndex}</td>
+                              <td className="p-2">
+                                {item.isValid ? (
+                                  <span className="inline-flex items-center gap-1 text-emerald-400 font-bold font-sans text-xs">
+                                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+                                    <span>Valid</span>
+                                  </span>
+                                ) : (
+                                  <span className="inline-flex items-center gap-1 text-red-400 font-bold font-sans text-[10px]" title={item.error}>
+                                    <XCircle className="w-3.5 h-3.5 text-red-400 shrink-0" />
+                                    <span className="truncate max-w-[120px]">{item.error}</span>
+                                  </span>
+                                )}
+                              </td>
+                              <td className="p-2 font-sans text-slate-200">{item.category}</td>
+                              <td className="p-2 font-sans text-white max-w-[160px] truncate" title={item.title}>
+                                {item.title}
+                              </td>
+                              <td className="p-2 text-cyan-300">{item.videoId || '—'}</td>
+                              <td className="p-2">
+                                {item.videoId ? (
+                                  <img
+                                    src={item.thumbnail}
+                                    alt=""
+                                    className="w-10 h-6 object-cover rounded border border-slate-700"
+                                  />
+                                ) : (
+                                  '—'
+                                )}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* SECTION 2: SINGLE ADD / EDIT VIDEO FORM */}
+              {showSingleVideoForm && (
+                <form
+                  onSubmit={handleSaveSingleVideo}
+                  className="bg-slate-900 p-4 rounded-2xl border border-pink-500/40 space-y-3 animate-in fade-in"
+                >
+                  <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+                    <h5 className="font-black text-xs text-white uppercase tracking-wider">
+                      {editingVideoId ? 'Edit Video' : 'Add Single Video'}
+                    </h5>
+                    <button
+                      type="button"
+                      onClick={() => setShowSingleVideoForm(false)}
+                      className="text-slate-400 hover:text-white text-xs font-bold"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                    <div>
+                      <label className="font-bold text-slate-300 block mb-1 text-[11px]">
+                        Category *
+                      </label>
+                      <input
+                        type="text"
+                        required
+                        value={singleVideoCategory}
+                        onChange={(e) => setSingleVideoCategory(e.target.value)}
+                        placeholder="Science, Arts, Cooking, Nature..."
+                        className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-white font-medium focus:outline-hidden focus:border-pink-500 text-xs"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="font-bold text-slate-300 block mb-1 text-[11px]">
+                        Display Order (1 = top)
+                      </label>
+                      <input
+                        type="number"
+                        min="1"
+                        value={singleVideoOrder}
+                        onChange={(e) => setSingleVideoOrder(parseInt(e.target.value, 10) || 1)}
+                        className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-white font-mono font-medium focus:outline-hidden focus:border-pink-500 text-xs"
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="font-bold text-slate-300 block mb-1 text-[11px]">
+                      Video Title *
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      value={singleVideoTitle}
+                      onChange={(e) => setSingleVideoTitle(e.target.value)}
+                      placeholder="e.g. Solar System & Planetary Science 101"
+                      className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-white font-medium focus:outline-hidden focus:border-pink-500 text-xs"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="font-bold text-slate-300 block mb-1 text-[11px]">
+                      YouTube Link or 11-char Video ID *
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      value={singleVideoLink}
+                      onChange={(e) => setSingleVideoLink(e.target.value)}
+                      placeholder="https://www.youtube.com/watch?v=libKVRa01L8 or libKVRa01L8"
+                      className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-white font-mono text-xs focus:outline-hidden focus:border-pink-500"
+                    />
+                  </div>
+
+                  <button
+                    type="submit"
+                    className="w-full py-2 bg-pink-600 hover:bg-pink-500 text-white font-black text-xs rounded-xl shadow-md tap-bounce flex items-center justify-center gap-1.5"
+                  >
+                    <Save className="w-3.5 h-3.5" />
+                    <span>{editingVideoId ? 'Update Video' : 'Save Video to Firestore'}</span>
+                  </button>
+                </form>
+              )}
+
+              {/* SECTION 3: VIDEO LIST WITH CATEGORY FILTERS & CONTROLS */}
+              <div className="space-y-3 pt-2">
+                <div className="flex items-center justify-between gap-2 flex-wrap">
+                  <div className="flex items-center gap-1.5 overflow-x-auto pb-1 max-w-full">
+                    {adminVideoCategories.map((cat: string) => (
+                      <button
+                        type="button"
+                        key={cat}
+                        onClick={() => {
+                          soundService.playClick();
+                          setAdminVideoFilter(cat);
+                        }}
+                        className={`px-2.5 py-1 rounded-xl text-xs font-bold tap-bounce transition-all ${
+                          adminVideoFilter === cat
+                            ? 'bg-pink-600 text-white font-black shadow-xs'
+                            : 'bg-slate-900 hover:bg-slate-800 text-slate-400 border border-slate-750'
+                        }`}
+                      >
+                        {cat}
+                      </button>
+                    ))}
+                  </div>
+
+                  <span className="text-[11px] text-slate-400 font-mono">
+                    {filteredAdminVideos.length} videos
+                  </span>
+                </div>
+
+                {loadingAdminVideos ? (
+                  <div className="py-10 text-center text-slate-400 text-xs">
+                    <RefreshCw className="w-6 h-6 animate-spin mx-auto mb-2 text-pink-500" />
+                    <span>Loading Firestore videos...</span>
+                  </div>
+                ) : filteredAdminVideos.length === 0 ? (
+                  <div className="p-8 text-center bg-slate-900/60 rounded-2xl border border-slate-800 space-y-2">
+                    <Film className="w-8 h-8 mx-auto text-slate-600" />
+                    <p className="font-bold text-slate-300 text-xs">No custom Firestore videos yet</p>
+                    <p className="text-[11px] text-slate-500 max-w-sm mx-auto">
+                      Use the bulk paste tool above to add multiple educational videos in one click!
+                    </p>
+                  </div>
+                ) : (
+                  <div className="space-y-2.5">
+                    {filteredAdminVideos.map((video: AdminVideo, idx: number) => (
+                      <div
+                        key={video.id}
+                        className={`p-3 rounded-2xl border flex items-center gap-3 transition-all ${
+                          video.approved !== false
+                            ? 'bg-slate-900 border-slate-800'
+                            : 'bg-slate-900/60 border-slate-850 opacity-60'
+                        }`}
+                      >
+                        {/* Thumbnail */}
+                        <div className="w-16 h-10 rounded-lg overflow-hidden bg-slate-950 shrink-0 border border-slate-800 relative">
+                          <img
+                            src={video.thumbnail}
+                            alt=""
+                            className="w-full h-full object-cover"
+                            loading="lazy"
+                          />
+                        </div>
+
+                        {/* Title & Metadata */}
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-[9px] font-black uppercase px-1.5 py-0.2 rounded-md bg-pink-950 text-pink-300 border border-pink-800">
+                              {video.category}
+                            </span>
+                            <span className="text-[10px] text-slate-400 font-mono">
+                              #{video.order ?? idx + 1}
+                            </span>
+                            {video.approved === false && (
+                              <span className="text-[9px] font-black uppercase px-1.5 py-0.2 rounded-md bg-slate-800 text-slate-400">
+                                Hidden
+                              </span>
+                            )}
+                          </div>
+                          <h5 className="font-bold text-xs text-white truncate mt-0.5">
+                            {video.title}
+                          </h5>
+                          <span className="text-[10px] text-slate-500 font-mono">
+                            ID: {video.videoId}
+                          </span>
+                        </div>
+
+                        {/* Reorder Buttons (Up / Down) */}
+                        <div className="flex flex-col gap-1 shrink-0">
+                          <button
+                            type="button"
+                            disabled={idx === 0}
+                            onClick={() => handleMoveVideoOrder(idx, 'up')}
+                            className="p-1 rounded bg-slate-800 hover:bg-slate-700 disabled:opacity-30 text-slate-300"
+                            title="Move Up"
+                          >
+                            <ArrowUp className="w-3 h-3" />
+                          </button>
+                          <button
+                            type="button"
+                            disabled={idx === filteredAdminVideos.length - 1}
+                            onClick={() => handleMoveVideoOrder(idx, 'down')}
+                            className="p-1 rounded bg-slate-800 hover:bg-slate-700 disabled:opacity-30 text-slate-300"
+                            title="Move Down"
+                          >
+                            <ArrowDown className="w-3 h-3" />
+                          </button>
+                        </div>
+
+                        {/* Actions: Hide/Show, Edit, Delete */}
+                        <div className="flex items-center gap-1 shrink-0">
+                          <button
+                            type="button"
+                            onClick={() => handleToggleVideoApproved(video)}
+                            className={`px-2 py-1 rounded-lg text-[10px] font-black tap-bounce border ${
+                              video.approved !== false
+                                ? 'bg-emerald-950 text-emerald-300 border-emerald-800'
+                                : 'bg-slate-800 text-slate-400 border-slate-700'
+                            }`}
+                            title="Toggle Approved / Hidden"
+                          >
+                            {video.approved !== false ? 'Show' : 'Hide'}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              soundService.playClick();
+                              setEditingVideoId(video.id);
+                              setSingleVideoCategory(video.category);
+                              setSingleVideoTitle(video.title);
+                              setSingleVideoLink(video.videoId);
+                              setSingleVideoOrder(video.order || idx + 1);
+                              setShowSingleVideoForm(true);
+                            }}
+                            className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white"
+                            title="Edit Video"
+                          >
+                            <Edit3 className="w-3 h-3" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteVideo(video.id)}
+                            className="p-1.5 rounded-lg bg-red-950/80 hover:bg-red-900 text-red-300 hover:text-white"
+                            title="Delete Video"
+                          >
+                            <Trash2 className="w-3 h-3" />
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* TAB 3: ROTATION LAUNCH DATE CONFIG */}
         {activeAdminTab === 'rotation' && (
           <div className="flex-1 overflow-y-auto p-4 space-y-4">
@@ -1433,10 +2333,87 @@ export const AdminWithdrawalModal: React.FC<AdminWithdrawalModalProps> = ({
 
         {/* Footer */}
         <div className="p-3 bg-slate-800 text-center border-t border-slate-700 text-[10px] text-slate-400 flex items-center justify-between shrink-0">
-          <span>Google Firestore Collections: <code>withdrawals</code>, <code>sponsor_ads</code>, <code>config</code></span>
+          <span>Google Firestore Collections: <code>withdrawals</code>, <code>sponsor_ads</code>, <code>videos</code>, <code>config</code></span>
           <span className="font-bold text-amber-400">Security Rules Enforced 🔒</span>
         </div>
       </div>
+
+      {/* SPONSOR AD PLACEMENT PREVIEW MODAL (Admin Only) */}
+      {previewAd && (
+        <div className="fixed inset-0 z-80 flex items-center justify-center bg-black/85 backdrop-blur-sm p-4 animate-in fade-in">
+          <div className="bg-slate-900 border-2 border-sky-500 rounded-3xl w-full max-w-md max-h-[90vh] flex flex-col shadow-2xl overflow-hidden text-white">
+            <div className="p-3.5 bg-slate-800 border-b border-slate-700 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Eye className="w-4 h-4 text-sky-400" />
+                <h4 className="font-black text-xs sm:text-sm text-white">
+                  Placement Preview: {previewAd.sponsorName}
+                </h4>
+              </div>
+              <button
+                type="button"
+                onClick={() => setPreviewAd(null)}
+                className="w-7 h-7 rounded-full bg-slate-700 hover:bg-slate-600 flex items-center justify-center text-slate-300"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+
+            {/* Placement Tabs */}
+            <div className="flex bg-slate-850 border-b border-slate-700 text-[11px] font-bold">
+              {[
+                { id: 'home', label: 'Home Feed' },
+                { id: 'video_list', label: 'Video List' },
+                { id: 'quiz', label: 'Quiz Interstitial' },
+              ].map((tab) => (
+                <button
+                  key={tab.id}
+                  type="button"
+                  onClick={() => {
+                    soundService.playClick();
+                    setPreviewPlacement(tab.id as any);
+                  }}
+                  className={`flex-1 py-2 text-center border-b-2 transition-all ${
+                    previewPlacement === tab.id
+                      ? 'border-sky-400 text-sky-400 font-black bg-slate-800/80'
+                      : 'border-transparent text-slate-400 hover:text-white'
+                  }`}
+                >
+                  {tab.label}
+                </button>
+              ))}
+            </div>
+
+            {/* Preview Card Display */}
+            <div className="p-4 overflow-y-auto space-y-4 bg-slate-950">
+              <div className="p-3 rounded-2xl bg-slate-900 border border-slate-800 space-y-2">
+                <span className="text-[10px] text-slate-400 font-black uppercase tracking-wider block">
+                  Live Placement: {previewPlacement === 'quiz' ? 'Compact Question Interstitial' : previewPlacement === 'video_list' ? 'Video List Feed' : 'Home Main Feed'}
+                </span>
+                <SponsorAdCard
+                  ad={previewAd}
+                  variant={previewPlacement === 'quiz' ? 'compact' : 'card'}
+                />
+              </div>
+
+              <div className="p-3 rounded-xl bg-slate-900/60 border border-slate-800 text-[11px] text-slate-400 space-y-1">
+                <p><strong>Package:</strong> {previewAd.package || 'Custom'} (${previewAd.amountPaid || 0} USD)</p>
+                <p><strong>Destination:</strong> <code className="text-sky-300">{previewAd.destinationLink}</code></p>
+                <p><strong>Tracking:</strong> Taps award 0 points. Impressions and clicks are recorded in Firestore.</p>
+              </div>
+            </div>
+
+            <div className="p-3 bg-slate-850 border-t border-slate-800 text-center">
+              <button
+                type="button"
+                onClick={() => setPreviewAd(null)}
+                className="w-full py-2 bg-sky-600 hover:bg-sky-500 text-white font-bold text-xs rounded-xl tap-bounce shadow-xs"
+              >
+                Close Preview
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

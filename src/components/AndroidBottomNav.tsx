@@ -68,15 +68,15 @@ export const AndroidBottomNav: React.FC<AndroidBottomNavProps> = ({
           >
             {/* Material 3 active pill indicator */}
             <div
-              className={`w-12 h-7 rounded-full flex items-center justify-center transition-all ${
+              className={`w-13 h-7.5 rounded-full flex items-center justify-center transition-all ${
                 isActive
-                  ? 'bg-rose-100 text-rose-600 scale-105 shadow-xs'
-                  : 'text-gray-500 group-hover:text-gray-700 hover:bg-gray-100/50'
+                  ? 'bg-rose-100 dark:bg-rose-950/60 text-rose-600 dark:text-rose-400 scale-105 shadow-xs'
+                  : 'text-gray-500 dark:text-gray-400 group-hover:text-gray-700 hover:bg-gray-100/60'
               }`}
             >
-              <IconComponent className="w-4 h-4" />
+              <IconComponent className="w-5 h-5" strokeWidth={isActive ? 2.5 : 2} />
               {tab.badge && (
-                <span className="absolute top-0.5 right-3 w-4 h-4 rounded-full bg-rose-600 text-white text-[9px] font-black flex items-center justify-center border-2 border-white shadow-xs">
+                <span className="absolute top-0 right-2 w-4 h-4 rounded-full bg-rose-600 text-white text-[9px] font-black flex items-center justify-center border-2 border-white shadow-xs">
                   {tab.badge}
                 </span>
               )}
@@ -84,8 +84,8 @@ export const AndroidBottomNav: React.FC<AndroidBottomNavProps> = ({
 
             {/* Label */}
             <span
-              className={`text-[10px] mt-0.5 font-bold transition-colors ${
-                isActive ? 'text-rose-600 font-extrabold' : 'text-gray-500'
+              className={`text-[11px] mt-0.5 font-bold transition-colors tracking-tight ${
+                isActive ? 'text-rose-600 dark:text-rose-400 font-extrabold' : 'text-gray-600 dark:text-gray-400'
               }`}
             >
               {seniorMode ? tab.urduLabel : tab.label}

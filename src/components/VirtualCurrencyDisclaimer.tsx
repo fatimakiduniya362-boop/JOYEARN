@@ -22,8 +22,8 @@ export const VirtualCurrencyDisclaimer: React.FC<VirtualCurrencyDisclaimerProps>
         <ShieldCheck className="w-3.5 h-3.5 text-amber-400 shrink-0" />
         <p className="text-[11px] font-extrabold text-amber-200 tracking-tight leading-snug">
           {isUrdu
-            ? 'پوائنٹس کو والیٹ کی شرائط کے تحت انعامات میں تبدیل کیا جا سکتا ہے۔ انعامات دستی جائزے پر منحصر ہیں اور گارنٹی شدہ نہیں ہیں۔'
-            : 'Rewards depend on ad revenue, are reviewed manually and are not guaranteed. Amounts may be very small.'}
+            ? 'پوائنٹس کو والیٹ کی شرائط کے تحت انعامات میں تبدیل کیا جا سکتا ہے۔ کم از کم رقم نکلوانا $100 ہے۔ انعامات دستی جائزے پر منحصر ہیں اور گارنٹی شدہ نہیں ہیں۔'
+            : 'Rewards depend on ad revenue, are reviewed manually and are not guaranteed. Minimum withdrawal is $100. Amounts may be very small.'}
         </p>
       </div>
     );
@@ -40,10 +40,10 @@ export const VirtualCurrencyDisclaimer: React.FC<VirtualCurrencyDisclaimerProps>
       </div>
       <p className="text-[11px] sm:text-[11.5px] font-extrabold text-amber-100 tracking-tight leading-snug drop-shadow-xs">
         {isUrdu ? (
-          <span>پوائنٹس کو والیٹ کی شرائط کے تحت انعامات میں تبدیل کیا جا سکتا ہے۔ انعامات دستی جائزے اور دستیاب فنڈز پر منحصر ہیں، 7 دن تک لگ سکتے ہیں اور گارنٹی شدہ نہیں ہیں۔</span>
+          <span>پوائنٹس کو والیٹ کی شرائط کے تحت انعامات میں تبدیل کیا جا سکتا ہے۔ کم از کم رقم نکلوانا $100 ہے۔ انعامات دستی جائزے اور دستیاب فنڈز پر منحصر ہیں، اور گارنٹی شدہ نہیں ہیں۔</span>
         ) : (
           <span>
-            <strong className="text-amber-300 font-black">Rewards Notice:</strong> Rewards depend on ad revenue, are reviewed manually and are not guaranteed. Amounts may be very small.
+            <strong className="text-amber-300 font-black">Rewards Notice:</strong> Rewards depend on ad revenue, are reviewed manually and are not guaranteed. Minimum withdrawal is $100. Amounts may be very small.
           </span>
         )}
       </p>

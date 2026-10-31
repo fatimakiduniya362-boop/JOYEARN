@@ -9,7 +9,7 @@
  * If left as 'LAUNCH_DATE_HERE', today automatically acts as Day 1.
  * Content is guaranteed never to wrap back to Day 1 before 190 days have passed.
  */
-export const ROTATION_START_DATE: string = 'LAUNCH_DATE_HERE';
+export const ROTATION_START_DATE: string = '2026-10-01';
 
 /** Minimum rotation cycle length (at least 190 days) */
 export const MIN_ROTATION_DAYS = 190;
@@ -35,12 +35,22 @@ export function isWorkingVideoUrl(url?: string): boolean {
   }
 }
 
+import { isMediaContentSafe } from '../services/contentSafetyService';
+import { WATCH_PAGE_VIDEOS } from '../data/watchVideosData';
+
 /**
  * Returns all active, verified working video entries from the curriculum.
- * Only returns videos where approved is true and the video URL is valid and working.
+ * Only returns videos where approved is true, the video URL is valid, and content is certified family-safe.
  */
 export function getWorkingVideos(): DailyVideoContent[] {
-  return ALL_VIDEOS.filter((v) => v.approved === true && isWorkingVideoUrl(v.videoUrl));
+  const safeVideos = ALL_VIDEOS.filter(
+    (v) => v.approved === true && isWorkingVideoUrl(v.videoUrl) && isMediaContentSafe(v)
+  );
+  if (safeVideos.length > 0) return safeVideos;
+  return WATCH_PAGE_VIDEOS.map((v, i) => ({
+    ...v,
+    dayNumber: i + 1,
+  }));
 }
 
 /**

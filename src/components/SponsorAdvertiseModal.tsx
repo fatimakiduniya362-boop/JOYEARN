@@ -174,7 +174,7 @@ export const SponsorAdvertiseModal: React.FC<SponsorAdvertiseModalProps> = ({
               <span>Sponsorship Guidelines & Terms</span>
             </div>
             <p className="text-[11.5px] leading-relaxed font-semibold">
-              Sponsors contact the app owner directly. Ad placement, price and payment are agreed directly with the owner outside the app. The app does not process any sponsor payments. Gambling, adult, scam, loan, fake-earning and misleading ads are not allowed.
+              Sponsors pay the app owner directly (fatimakiduniya362@gmail.com), and the ad starts only after payment is confirmed by the owner. Ad placement, price and payment are agreed directly with the owner outside the app. The app does not process any sponsor payments. Gambling, adult, scam, loan, fake-earning and misleading ads are not allowed.
             </p>
           </div>
 
@@ -333,7 +333,7 @@ export const SponsorAdvertiseModal: React.FC<SponsorAdvertiseModalProps> = ({
                   Thank you for your enquiry!
                 </h4>
                 <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed font-medium">
-                  Your enquiry for the <strong>{selectedPackage}</strong> package has been sent to the app owner. We will review your application and contact you directly via your provided email address.
+                  Your enquiry for the <strong>{selectedPackage}</strong> package has been sent to the app owner. Sponsors pay the app owner directly (<strong>fatimakiduniya362@gmail.com</strong>), and the ad starts only after payment is confirmed by the owner. We will reply to your provided email address shortly.
                 </p>
                 <button
                   type="button"

@@ -10,34 +10,46 @@ service cloud.firestore {
         request.auth.token.email_verified == true;
     }
 
-    // User profile and points document
+    // User profile and points document (Wallet)
     match /users/{userId} {
-      // Each user can only read their own document
-      allow read: if request.auth != null && request.auth.uid == userId;
+      // Users can only read their own wallet document; Admin can read all users
+      allow read: if request.auth != null && (request.auth.uid == userId || isAdmin());
 
-      // New users can create their own profile document with safe starting points
+      // New users start at zero! Points must equal 0, approvedBalanceUSD must be 0
       allow create: if request.auth != null &&
         request.auth.uid == userId &&
-        request.resource.data.points <= 1500 &&
+        request.resource.data.points <= 0 &&
+        (!('approvedBalanceUSD' in request.resource.data) || request.resource.data.approvedBalanceUSD <= 0) &&
         (!('role' in request.resource.data) || request.resource.data.role == 'member');
 
       // Users can update their document:
       // 1. Role cannot be elevated to admin
-      // 2. Points can only increase by at most daily limit (2500 pts) per update or decrease (when withdrawing/perk redemption)
-      // 3. Streak can only increase by at most 1 day per update
+      // 2. approvedBalanceUSD CANNOT be modified by users (only admin/cloud system on published months)
+      // 3. publishedMonthsCredited CANNOT be modified by users
+      // 4. isExcludedFromPool CANNOT be modified by users
+      // 5. Points can only increase by at most daily ceiling (2500 pts) per update or decrease
+      // 6. Streak can only increase by at most 1 day per update
       allow update: if request.auth != null &&
-        request.auth.uid == userId &&
-        (!('role' in request.resource.data) || request.resource.data.role == resource.data.role) &&
         (
-          // Points reduction (e.g. withdrawal or perk spend)
-          request.resource.data.points <= resource.data.points ||
-          // Or safe points increase within daily max limit (2500 pts max jump)
-          (request.resource.data.points - resource.data.points <= 2500)
-        ) &&
-        (
-          !('streakDays' in request.resource.data) ||
-          !('streakDays' in resource.data) ||
-          request.resource.data.streakDays <= resource.data.streakDays + 1
+          isAdmin() ||
+          (
+            request.auth.uid == userId &&
+            (!('role' in request.resource.data) || request.resource.data.role == resource.data.role) &&
+            (!('approvedBalanceUSD' in request.resource.data) || request.resource.data.approvedBalanceUSD == resource.data.approvedBalanceUSD) &&
+            (!('publishedMonthsCredited' in request.resource.data) || request.resource.data.publishedMonthsCredited == resource.data.publishedMonthsCredited) &&
+            (!('isExcludedFromPool' in request.resource.data) || request.resource.data.isExcludedFromPool == resource.data.isExcludedFromPool) &&
+            (
+              // Points reduction (e.g. perk spend)
+              request.resource.data.points <= resource.data.points ||
+              // Safe points increase within daily max limit (2500 pts max jump)
+              (request.resource.data.points - resource.data.points <= 2500)
+            ) &&
+            (
+              !('streakDays' in request.resource.data) ||
+              !('streakDays' in resource.data) ||
+              request.resource.data.streakDays <= resource.data.streakDays + 1
+            )
+          )
         );
 
       // Users can delete their own profile data (account deletion)
@@ -51,8 +63,7 @@ service cloud.firestore {
 
       // Subcollection for completed daily tasks: exactly 1 write per task per day per user
       match /completed_tasks/{taskRecordId} {
-        allow read: if request.auth != null && request.auth.uid == userId;
-        // User can only write their own record, exactly once per task per day
+        allow read: if request.auth != null && (request.auth.uid == userId || isAdmin());
         allow create: if request.auth != null &&
           request.auth.uid == userId &&
           request.resource.data.userId == userId &&
@@ -60,9 +71,9 @@ service cloud.firestore {
         allow update, delete: if false; // Once recorded for today, cannot be rewritten
       }
 
-      // Subcollection for daily 100% completion summaries (counts toward monthly prize pool)
+      // Subcollection for daily 100% completion summaries
       match /daily_summaries/{dateStr} {
-        allow read: if request.auth != null && request.auth.uid == userId;
+        allow read: if request.auth != null && (request.auth.uid == userId || isAdmin());
         allow create, update: if request.auth != null &&
           request.auth.uid == userId &&
           request.resource.data.userId == userId &&
@@ -71,16 +82,16 @@ service cloud.firestore {
       }
     }
 
-    // Monthly community prize pool metrics (qualifying points across users)
+    // Monthly community prize pool & received funds metrics
+    // Only verified admin can change months, pool, funds received, or publish
     match /monthly_pools/{monthYear} {
       allow read: if true;
-      allow create, update: if request.auth != null;
-      allow delete: if isAdmin();
+      allow create, update, delete: if isAdmin();
     }
 
     // Welcome bonus collection: strictly 1 claim per Google account
     match /welcome_bonuses/{userId} {
-      allow read: if request.auth != null && request.auth.uid == userId;
+      allow read: if request.auth != null && (request.auth.uid == userId || isAdmin());
       allow create: if request.auth != null && request.auth.uid == userId;
       allow update, delete: if false; // Immutable once claimed
     }
@@ -93,43 +104,52 @@ service cloud.firestore {
         isAdmin()
       );
 
-      // User can only create withdrawal requests for themselves, only if amount >= 5000 pts ($5.00),
-      // status must be 'Pending', and points cover the requested amount
+      // User creates withdrawal request from approvedBalanceUSD:
+      // Minimum: $100 USD (or 100,000 pts legacy)
+      // Maximum per request: $500 USD (or 500,000 pts legacy)
+      // Status must initially be 'Submitted' (or 'Pending' for legacy compatibility)
       allow create: if request.auth != null &&
         request.resource.data.userUid == request.auth.uid &&
-        request.resource.data.pointsAmount >= 5000 &&
-        request.resource.data.status == 'Pending';
+        (
+          (request.resource.data.cashAmount >= 100 && request.resource.data.cashAmount <= 500) ||
+          (request.resource.data.points >= 100000 && request.resource.data.points <= 500000)
+        ) &&
+        request.resource.data.status in ['Submitted', 'Pending'] &&
+        request.resource.data.paymentMethod in ['Easypaisa', 'JazzCash', 'PayPal', 'Bank transfer', 'Bank'] &&
+        request.resource.data.accountDetails is string &&
+        request.resource.data.accountDetails.size() >= 5 &&
+        request.resource.data.accountDetails.size() <= 100 &&
+        request.resource.data.accountName is string &&
+        request.resource.data.accountName.size() >= 2;
 
       // Users can NEVER edit a withdrawal after creating it.
-      // Only the verified admin can update status and admin audit notes.
+      // Only the verified admin can update payout status (Submitted, Under review, Verified, Paid, Rejected).
       allow update: if isAdmin();
 
       // No deletion of processed withdrawals allowed
       allow delete: if false;
     }
 
-    // Sponsor Ads: Everyone can read active ads, only verified admin can read all and manage ads
+    // Sponsor Ads: Everyone can read active ads, only verified admin can manage ads
     match /sponsor_ads/{adId} {
       allow read: if resource.data.isActive == true || isAdmin();
       allow create, update, delete: if isAdmin();
     }
 
     // App Configuration (e.g. rotation launch date)
-    // Anyone can read; first initialization allowed if not yet created; only admin can update/change
+    // Anyone can read; only admin can create, update, or delete
     match /config/{configDoc} {
       allow read: if true;
-      allow create: if request.auth != null;
-      allow update, delete: if isAdmin();
+      allow create, update, delete: if isAdmin();
     }
 
-    // Safety and content reports collection (accessible only to admin, writable by users)
+    // Safety and content reports collection
     match /reports/{reportId} {
       allow create: if true;
       allow read, update, delete: if isAdmin();
     }
 
-    // Sponsor Enquiries: Signed-in users can only create their own enquiry with valid fields & length limits,
-    // and createdAt equal to request.time. Only verified admin can read, update or delete.
+    // Sponsor Enquiries
     match /sponsor_enquiries/{enquiryId} {
       allow create: if request.auth != null &&
         request.resource.data.userId == request.auth.uid &&
@@ -150,6 +170,12 @@ service cloud.firestore {
         request.resource.data.createdAt == request.time;
 
       allow read, update, delete: if isAdmin();
+    }
+
+    // Videos collection for Admin management
+    match /videos/{videoId} {
+      allow read: if true;
+      allow create, update, delete: if isAdmin();
     }
   }
 }

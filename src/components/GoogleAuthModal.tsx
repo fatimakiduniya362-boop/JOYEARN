@@ -65,24 +65,11 @@ export const GoogleAuthModal: React.FC<GoogleAuthModalProps> = ({
       }
     } catch (err: any) {
       if (err?.code === 'auth/popup-blocked' || err?.message?.includes('popup-blocked') || err?.isPopupBlocked) {
-        console.warn('Google Sign In popup blocked by browser/iframe policy. Connecting seamless Google session for fatimakiduniya362@gmail.com.');
-        const fallbackUser: AppUser = {
-          uid: 'google_user_fatimakiduniya',
-          displayName: 'Fatima',
-          email: 'fatimakiduniya362@gmail.com',
-          photoURL: null,
-          confirmationEmailSent: false
-        };
-        onUserChange(fallbackUser);
-        const bonusClaimed = localStorage.getItem(`joyearn_auth_bonus_${fallbackUser.uid}`);
-        if (!bonusClaimed) {
-          onAwardWelcomeBonus(50);
-          localStorage.setItem(`joyearn_auth_bonus_${fallbackUser.uid}`, 'true');
-        }
-        setSuccessNotice(
+        console.warn('Google Sign In popup blocked by browser/iframe policy.');
+        setErrorMessage(
           seniorMode
-            ? 'گوگل سیشن کامیابی سے فعال ہو گیا (fatimakiduniya362@gmail.com) 🎉'
-            : 'Signed in as fatimakiduniya362@gmail.com 🎉'
+            ? 'گوگل پاپ اپ ونڈو بلاک ہو گئی ہے۔ براہ کرم براؤزر کی اجازت دیں اور دوبارہ کوشش کریں۔'
+            : 'Google Sign-in popup was blocked by your browser. Please allow popups for this site and try again.'
         );
         return;
       }

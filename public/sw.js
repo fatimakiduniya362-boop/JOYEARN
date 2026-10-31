@@ -37,6 +37,20 @@ self.addEventListener('activate', (event) => {
 self.addEventListener('fetch', (event) => {
   if (event.request.method !== 'GET') return;
 
+  const url = new URL(event.request.url);
+  // Never intercept or cache authentication, Firebase Auth, Google APIs, or token requests
+  if (
+    url.hostname.includes('firebase') ||
+    url.hostname.includes('identitytoolkit') ||
+    url.hostname.includes('securetoken.googleapis.com') ||
+    url.hostname.includes('accounts.google.com') ||
+    url.hostname.includes('firestore.googleapis.com') ||
+    url.pathname.includes('/auth') ||
+    url.pathname.includes('/api/auth')
+  ) {
+    return; // Pass through directly to network
+  }
+
   event.respondWith(
     caches.match(event.request).then((cachedResponse) => {
       if (cachedResponse) {

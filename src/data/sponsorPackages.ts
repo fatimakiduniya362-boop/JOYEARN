@@ -18,7 +18,7 @@ export interface SponsorPackage {
 }
 
 export const SPONSOR_AUDIENCE_TEXT = "Adults (18+), learning and family content";
-export const SPONSOR_PAYMENT_TEXT = "Payment is made in advance directly to the owner. Placement and price are fixed as listed.";
+export const SPONSOR_PAYMENT_TEXT = "Sponsors pay the app owner directly (fatimakiduniya362@gmail.com), and the ad starts only after payment is confirmed by the owner. Placement and price are fixed as listed.";
 export const SPONSOR_DISCLAIMER_TEXT = "Prices are in US dollars. Impressions are counted by the app and shown in your report. Clicks and results are not guaranteed.";
 
 export const SPONSOR_PACKAGES: SponsorPackage[] = [

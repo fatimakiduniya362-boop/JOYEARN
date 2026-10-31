@@ -25,9 +25,25 @@ export const TopEarnersSection: React.FC<TopEarnersSectionProps> = ({
   const [cloudEarners, setCloudEarners] = useState<TopEarner[]>([]);
   const [isLoading, setIsLoading] = useState(false);
 
-  // Fetch real users from Firestore
+  // Fetch real users from Firestore (limited to 20 items, cached for 1 hour)
   useEffect(() => {
     let isMounted = true;
+    const cacheKey = 'joyearn_top_earners_cache';
+    const timeKey = 'joyearn_top_earners_time';
+    const now = Date.now();
+    const CACHE_TTL = 60 * 60 * 1000; // 1-hour cache
+
+    try {
+      const lastTime = parseInt(localStorage.getItem(timeKey) || '0', 10);
+      if (now - lastTime < CACHE_TTL) {
+        const cached = localStorage.getItem(cacheKey);
+        if (cached) {
+          setCloudEarners(JSON.parse(cached));
+          return;
+        }
+      }
+    } catch {}
+
     const fetchRealEarners = async () => {
       const db = getFirestoreDB();
       if (!db) return;
@@ -35,7 +51,8 @@ export const TopEarnersSection: React.FC<TopEarnersSectionProps> = ({
       try {
         setIsLoading(true);
         const usersRef = collection(db, 'users');
-        const q = query(usersRef, orderBy('points', 'desc'), limit(10));
+        // Limit to 20 items for free Firebase tier
+        const q = query(usersRef, orderBy('points', 'desc'), limit(20));
         const snap = await getDocs(q);
 
         if (!snap.empty && isMounted) {
@@ -57,6 +74,10 @@ export const TopEarnersSection: React.FC<TopEarnersSectionProps> = ({
             });
           });
           setCloudEarners(list);
+          try {
+            localStorage.setItem(cacheKey, JSON.stringify(list));
+            localStorage.setItem(timeKey, String(now));
+          } catch {}
         }
       } catch (err) {
         // Silently handle firestore read restrictions and keep real local user

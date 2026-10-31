@@ -33,7 +33,8 @@ import { ADMIN_EMAIL } from './AdminWithdrawalModal';
 // 💰 REAL REWARDS & WITHDRAWAL CONFIGURATION (EDITABLE AT TOP OF CODE)
 // ============================================================================
 export const POINTS_PER_DOLLAR = 1000; // 1,000 Points = $1.00 USD
-export const MIN_WITHDRAW_POINTS = 5000; // Minimum 5,000 Points ($5.00) required to withdraw
+export const MIN_WITHDRAW_USD = 100; // Editable constant: Minimum $100 USD threshold
+export const MIN_WITHDRAW_POINTS = MIN_WITHDRAW_USD * POINTS_PER_DOLLAR; // Minimum 100,000 Points ($100 USD) required to withdraw
 export const DAILY_MAX_POINTS = 2500; // Anti-cheat: max points earnable per day
 export const REWARDED_VIDEO_COOLDOWN_SECONDS = 120; // 2 minutes cooldown between rewarded video claims
 
@@ -277,18 +278,25 @@ export const WalletModal: React.FC<WalletModalProps> = ({
       setSimulatedAdSeconds((prev) => {
         if (prev <= 1) {
           clearInterval(timer);
-          setSimulatedAdPlaying(false);
-          soundService.playCoin();
-          hapticService.success();
-          localStorage.setItem('joyearn_last_rewarded_video_time', String(Date.now()));
-          setCooldownRemaining(REWARDED_VIDEO_COOLDOWN_SECONDS);
-          onEarnPoints(50, 'Watched Rewarded Family Partner Ad');
           return 0;
         }
         return prev - 1;
       });
     }, 1000);
   };
+
+  useEffect(() => {
+    if (simulatedAdPlaying && simulatedAdSeconds === 0) {
+      setSimulatedAdPlaying(false);
+      soundService.playCoin();
+      hapticService.success();
+      try {
+        localStorage.setItem('joyearn_last_rewarded_video_time', String(Date.now()));
+      } catch {}
+      setCooldownRemaining(REWARDED_VIDEO_COOLDOWN_SECONDS);
+      onEarnPoints(50, 'Watched Rewarded Family Partner Ad');
+    }
+  }, [simulatedAdPlaying, simulatedAdSeconds, onEarnPoints]);
 
   const handleSimulatePurchase = (product: InAppProduct) => {
     soundService.playClick();
@@ -488,6 +496,20 @@ export const WalletModal: React.FC<WalletModalProps> = ({
                   Earn points by completing daily 5-question quizzes, maintaining streaks, and optional rewarded videos.
                 </p>
 
+                {/* Minimum withdrawal: $100 & Progress bar toward $100 */}
+                <div className="space-y-1 pt-1 border-t border-emerald-400/30">
+                  <div className="flex justify-between text-[10px] font-bold text-emerald-100">
+                    <span>Minimum withdrawal: $100</span>
+                    <span>{progressToMin}% (${cashValue} / $100)</span>
+                  </div>
+                  <div className="w-full h-2 bg-emerald-950/40 rounded-full overflow-hidden p-0.5 shadow-inner">
+                    <div
+                      className="bg-gradient-to-r from-amber-300 to-emerald-300 h-full rounded-full transition-all duration-500"
+                      style={{ width: `${Math.min(100, Math.max(3, progressToMin))}%` }}
+                    />
+                  </div>
+                </div>
+
                 <button
                   onClick={() => setActiveTab('withdraw')}
                   disabled={!canWithdraw}
@@ -501,8 +523,8 @@ export const WalletModal: React.FC<WalletModalProps> = ({
                     {canWithdraw
                       ? seniorMode
                         ? 'ابھی رقم ٹرانسفر کریں'
-                        : 'Withdraw Funds Now'
-                      : `Need ${(MIN_WITHDRAW_POINTS - points).toLocaleString()} more points to withdraw`}
+                        : 'Withdraw Funds Now ($100 Ready)'
+                      : `Need $${((MIN_WITHDRAW_POINTS - points) / POINTS_PER_DOLLAR).toFixed(2)} (${(MIN_WITHDRAW_POINTS - points).toLocaleString()} Pts) more to reach $100 min`}
                   </span>
                 </button>
               </div>
@@ -577,17 +599,37 @@ export const WalletModal: React.FC<WalletModalProps> = ({
               </div>
 
               {!canWithdraw ? (
-                <div className="text-center py-8 px-4 bg-slate-50 dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 space-y-2">
+                <div className="text-center py-6 px-4 bg-slate-50 dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 space-y-3">
                   <Lock className="w-8 h-8 text-slate-400 mx-auto" />
-                  <h4 className="font-black text-sm text-slate-800 dark:text-slate-100">
-                    Withdrawal Locked
-                  </h4>
+                  <div>
+                    <span className="text-[10px] font-black uppercase tracking-wider text-amber-700 dark:text-amber-300 bg-amber-100 dark:bg-amber-950 px-2.5 py-0.5 rounded-full border border-amber-300">
+                      Minimum withdrawal: $100
+                    </span>
+                    <h4 className="font-black text-sm text-slate-800 dark:text-slate-100 mt-1">
+                      Withdrawal Locked
+                    </h4>
+                  </div>
                   <p className="text-xs text-slate-500 dark:text-slate-400 max-w-xs mx-auto">
-                    You currently have {points.toLocaleString()} points. You need at least {MIN_WITHDRAW_POINTS.toLocaleString()} points ($5.00) to submit a payout request.
+                    You currently have {points.toLocaleString()} points (${cashValue}). You need at least {MIN_WITHDRAW_POINTS.toLocaleString()} points ($100.00) to submit a payout request.
                   </p>
+
+                  {/* Progress bar toward $100 */}
+                  <div className="space-y-1 max-w-xs mx-auto text-left bg-white dark:bg-slate-900 p-2.5 rounded-xl border border-slate-200 dark:border-slate-700">
+                    <div className="flex justify-between text-[10px] font-bold text-slate-600 dark:text-slate-300">
+                      <span>Progress to $100:</span>
+                      <span className="font-black text-amber-600">{progressToMin}%</span>
+                    </div>
+                    <div className="w-full h-2.5 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden p-0.5">
+                      <div
+                        className="bg-gradient-to-r from-amber-400 to-emerald-500 h-full rounded-full transition-all duration-500"
+                        style={{ width: `${Math.min(100, Math.max(3, progressToMin))}%` }}
+                      />
+                    </div>
+                  </div>
+
                   <button
                     onClick={() => setActiveTab('wallet')}
-                    className="px-4 py-2 bg-amber-500 text-white font-bold rounded-xl text-xs tap-bounce mt-2"
+                    className="px-4 py-2 bg-amber-500 text-white font-bold rounded-xl text-xs tap-bounce mt-1"
                   >
                     Earn More Points
                   </button>

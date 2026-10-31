@@ -17,6 +17,7 @@ interface DailyGoalsWidgetProps {
   seniorMode?: boolean;
   onOpenCalendarModal?: () => void;
   onRewardsReadyClick?: () => void;
+  celebrateBurst?: boolean;
 }
 
 export const DailyGoalsWidget: React.FC<DailyGoalsWidgetProps> = ({
@@ -25,6 +26,7 @@ export const DailyGoalsWidget: React.FC<DailyGoalsWidgetProps> = ({
   seniorMode = false,
   onOpenCalendarModal,
   onRewardsReadyClick,
+  celebrateBurst = false,
 }) => {
   const { light, success } = useHaptics();
 
@@ -43,16 +45,29 @@ export const DailyGoalsWidget: React.FC<DailyGoalsWidgetProps> = ({
   };
 
   return (
-    <section className="px-4 py-1.5">
+    <section className="px-4 py-1.5 relative">
+      {/* Festive Confetti Burst on 5th Activity Completion */}
+      {celebrateBurst && (
+        <div className="absolute inset-x-4 -top-3 z-30 flex items-center justify-center pointer-events-none">
+          <div className="bg-gradient-to-r from-amber-400 via-rose-500 to-purple-600 text-white font-black text-xs px-3 py-1 rounded-full shadow-lg flex items-center gap-1.5 animate-bounce">
+            <span>🎉</span>
+            <span>5th Activity Complete! Daily Goal Met!</span>
+            <span>🎊</span>
+          </div>
+        </div>
+      )}
+
       <div
         className={`bg-white dark:bg-slate-900 border-2 rounded-3xl p-3.5 shadow-md transition-all relative overflow-hidden ${
-          isRewardsReady
+          celebrateBurst
+            ? 'border-amber-400 ring-4 ring-amber-400/50 shadow-xl shadow-amber-500/20 scale-[1.02]'
+            : isRewardsReady
             ? 'border-emerald-400 dark:border-emerald-500/80 ring-2 ring-emerald-300/40 shadow-emerald-500/10'
             : 'border-slate-200 dark:border-slate-800'
         }`}
       >
         {/* Subtle Ambient Background Glow */}
-        {isRewardsReady && (
+        {(isRewardsReady || celebrateBurst) && (
           <div className="absolute -top-10 -right-10 w-28 h-28 bg-emerald-400/15 rounded-full blur-xl pointer-events-none" />
         )}
 

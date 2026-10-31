@@ -1,4 +1,5 @@
 import { darkModeService } from './services/darkModeService';
+import { crashlytics } from './services/crashlytics';
 import { FirstTimeTutorialOverlay } from './components/FirstTimeTutorialOverlay';
 import { AdMobBanner } from './components/AdMobBanner';
 import { PromotedOffersSection } from './components/PromotedOffersSection';
@@ -41,6 +42,7 @@ import { ThemeKey, VideoContent, QuizItem, SponsoredTask, WithdrawalRequest, Tra
 import { THEMES, INITIAL_VIDEOS, INITIAL_QUIZZES, INITIAL_TASKS, INITIAL_TRANSACTIONS, INITIAL_REFERRALS } from './data/mockData';
 import { getTodayUnlockedVideos, getTodayDayIndex } from './utils/dailyRotation';
 import { ALL_QUIZZES } from './data/quizDatabase';
+import { WATCH_PAGE_VIDEOS } from './data/watchVideosData';
 import { DailyTasksCard } from './components/DailyTasksCard';
 import { MandatoryTaskId } from './utils/dailyTasksConfig';
 import { isDailyQuizCompletedToday } from './services/dailyQuizService';
@@ -49,11 +51,11 @@ import { isDailyQuizCompletedToday } from './services/dailyQuizService';
 import { MiniGames } from './components/MiniGames';
 import { KidsZone } from './components/KidsZone';
 import { VirtualGarden } from './components/VirtualGarden';
-import { WalletModal, DAILY_MAX_POINTS } from './components/WalletModal';
-import { WatchModal } from './components/WatchModal';
+import { WalletPage, DAILY_MAX_POINTS } from './components/WalletPage';
+import { WatchPage } from './components/WatchPage';
+import { LearnPage } from './components/LearnPage';
+import { TasksPage } from './components/TasksPage';
 import { VideoThumbnail } from './components/VideoThumbnail';
-import { LearnModal } from './components/LearnModal';
-import { TasksModal } from './components/TasksModal';
 import { InviteModal } from './components/InviteModal';
 import { OfflineModal } from './components/OfflineModal';
 import { DailyChestModal } from './components/DailyChestModal';
@@ -85,11 +87,40 @@ import { CommunityChatModal } from './components/CommunityChatModal';
 import { ShopMarketModal } from './components/ShopMarketModal';
 import { CreatorAgencyModal } from './components/CreatorAgencyModal';
 import { VlogShortsModal } from './components/VlogShortsModal';
+import { LudoGame } from './components/LudoGame';
 import { useImmersiveMode } from './hooks/useImmersiveMode';
 import { soundService } from './services/soundService';
 import { hapticService } from './services/haptics';
-import { crashlytics } from './services/crashlytics';
-import { initAuth, logout, deleteCurrentAuthUser } from './services/googleAuth';
+import { initAuth, logout, deleteCurrentAuthUser, getLastSavedProfile, checkRedirectResult } from './services/googleAuth';
+
+export type NavTab = 'home' | 'watch' | 'learn' | 'tasks' | 'wallet';
+
+export type ActiveModalType =
+  | null
+  | 'watch'
+  | 'learn'
+  | 'play'
+  | 'ludo'
+  | 'tasks'
+  | 'invite'
+  | 'wallet'
+  | 'offline'
+  | 'kids'
+  | 'garden'
+  | 'chest'
+  | 'themes'
+  | 'notifications'
+  | 'wheel'
+  | 'auth'
+  | 'settings'
+  | 'privacy'
+  | 'dashboard'
+  | 'livestream'
+  | 'community'
+  | 'shop'
+  | 'agency'
+  | 'vlogs'
+  | 'dailyGoalsCalendar';
 
 export default function App() {
   // Theme state
@@ -115,13 +146,61 @@ export default function App() {
   const [userName, setUserName] = useState(() => localStorage.getItem('joyearn_userName') || 'Learner');
   const [currentUser, setCurrentUser] = useState<AppUser | null>(() => {
     try {
+      const cached = getLastSavedProfile();
+      if (cached) {
+        return {
+          uid: cached.uid,
+          displayName: cached.displayName || 'Learner',
+          email: cached.email || null,
+          photoURL: cached.photoURL || null,
+          confirmationEmailSent: cached.confirmationEmailSent || false,
+        };
+      }
       const saved = localStorage.getItem('joyearn_app_user');
-      return saved ? JSON.parse(saved) : null;
+      if (saved) return JSON.parse(saved);
+      const stableUid = localStorage.getItem('joyearn_stable_device_uid');
+      if (stableUid) {
+        return {
+          uid: stableUid,
+          displayName: localStorage.getItem('joyearn_userName') || 'Learner',
+          email: localStorage.getItem('joyearn_user_email') || null,
+          photoURL: null,
+          confirmationEmailSent: localStorage.getItem(`joyearn_email_sent_${stableUid}`) === 'true',
+        };
+      }
+      return null;
     } catch {
       return null;
     }
   });
+
+  // authReady stays false until Firebase onAuthStateChanged has fired for the first time
+  const [authReady, setAuthReady] = useState(false);
+  const [serverBusyNotice, setServerBusyNotice] = useState<string | null>(null);
+
   const [points, setPoints] = useState(1450); // initial JoyPoints balance
+  const [pointsScaling, setPointsScaling] = useState(false);
+  const prevPointsRef = useRef(points);
+
+  // Animate JoyPoints balance indicator with subtle scaling effect whenever new points are earned
+  useEffect(() => {
+    if (points > prevPointsRef.current) {
+      setPointsScaling(true);
+      const timer = setTimeout(() => {
+        setPointsScaling(false);
+      }, 750);
+      return () => clearTimeout(timer);
+    }
+    prevPointsRef.current = points;
+  }, [points]);
+
+  useEffect(() => {
+    if ('scrollRestoration' in history) {
+      history.scrollRestoration = 'manual';
+    }
+    window.scrollTo({ top: 0, left: 0, behavior: 'instant' });
+  }, []);
+
   const [totalJoyPointsEarned, setTotalJoyPointsEarned] = useState<number>(() => {
     try {
       const saved = localStorage.getItem('joyearn_lifetime_points');
@@ -256,8 +335,12 @@ export default function App() {
       setCompletedDailyTaskIds((prev) => prev.includes('daily_quiz') ? prev : [...prev, 'daily_quiz']);
     }
 
+    // Check for redirect sign-in result on startup
+    checkRedirectResult().catch(() => {});
+
     const unsubscribe = initAuth(
       (user) => {
+        setAuthReady(true);
         const isEmailSent = localStorage.getItem(`joyearn_email_sent_${user.uid}`) === 'true';
         setCurrentUser({
           uid: user.uid,
@@ -287,18 +370,49 @@ export default function App() {
               email: user.email,
               displayName: user.displayName,
               lastActiveDate: todayStr,
-            });
+            }).catch(() => {});
           }
+        }).catch(() => {
+          // Never sign out on network/Firestore error
         });
       },
       () => {
-        setCurrentUser(null);
+        // Firebase onAuthStateChanged has fired for the first time
+        setAuthReady(true);
+        // Preserve saved persistent profile so user stays signed in
+        const cached = getLastSavedProfile();
+        if (!cached) {
+          try {
+            const saved = localStorage.getItem('joyearn_app_user');
+            if (!saved) {
+              const stableUid = localStorage.getItem('joyearn_stable_device_uid');
+              if (!stableUid) {
+                setCurrentUser(null);
+              }
+            }
+          } catch {
+            // keep existing user state
+          }
+        }
       }
     );
 
     return () => {
       if (unsubscribe) unsubscribe();
     };
+  }, []);
+
+  // Listen for Firestore server quota / busy notification
+  useEffect(() => {
+    const handleServerBusy = (e: any) => {
+      const msg = e?.detail || 'The server is busy right now. Your progress is saved on your device and will sync later.';
+      setServerBusyNotice(msg);
+      setTimeout(() => {
+        setServerBusyNotice(null);
+      }, 7000);
+    };
+    window.addEventListener('joyearn_server_busy', handleServerBusy);
+    return () => window.removeEventListener('joyearn_server_busy', handleServerBusy);
   }, []);
 
   const handleLanguageChange = (lang: 'en' | 'ur') => {
@@ -366,37 +480,100 @@ export default function App() {
   const [watchedVideoIds, setWatchedVideoIds] = useState<string[]>(['v1']);
   const [gamesCompletedCount, setGamesCompletedCount] = useState<number>(1);
 
+  // Active primary bottom navigation tab & navigation history
+  const [activeTab, setActiveTab] = useState<NavTab>('home');
   // Active modal
-  const [activeModal, setActiveModal] = useState<
-    | null
-    | 'watch'
-    | 'learn'
-    | 'play'
-    | 'tasks'
-    | 'invite'
-    | 'wallet'
-    | 'offline'
-    | 'kids'
-    | 'garden'
-    | 'chest'
-    | 'themes'
-      | 'notifications'
-    | 'wheel'
-    | 'auth'
-    | 'settings'
-    | 'privacy'
-    | 'dashboard'
-    
-    | 'livestream'
-    | 'community'
-    | 'shop'
-    | 'agency'
-    | 'vlogs'
-    | 'dailyGoalsCalendar'
-  >(null);
+  const [activeModal, setActiveModal] = useState<ActiveModalType>(null);
+
+  const tabScrollPositions = useRef<Record<string, number>>({});
+  const tabHistoryRef = useRef<NavTab[]>(['home']);
+  const activeTabRef = useRef<NavTab>('home');
+  const activeModalRef = useRef<ActiveModalType | null>(null);
+
+  useEffect(() => {
+    activeTabRef.current = activeTab;
+  }, [activeTab]);
+
+  useEffect(() => {
+    activeModalRef.current = activeModal;
+  }, [activeModal]);
+
+  // Global Back navigation handler (browser history, Android hardware back, and gesture back)
+  useEffect(() => {
+    const handlePopState = () => {
+      // 1. If an active modal is open, close the modal first
+      if (activeModalRef.current !== null) {
+        setActiveModal(null);
+        return;
+      }
+      // 2. If tab history has depth, return to the previous tab
+      if (tabHistoryRef.current.length > 1) {
+        tabHistoryRef.current.pop();
+        const prevTab = tabHistoryRef.current[tabHistoryRef.current.length - 1] || 'home';
+        setActiveTab(prevTab);
+        // Scroll restoration
+        requestAnimationFrame(() => {
+          const savedPos = tabScrollPositions.current[prevTab];
+          if (typeof savedPos === 'number' && savedPos > 0) {
+            window.scrollTo({ top: savedPos, behavior: 'instant' });
+          } else {
+            window.scrollTo({ top: 0, behavior: 'instant' });
+          }
+        });
+      } else if (activeTabRef.current !== 'home') {
+        setActiveTab('home');
+        window.scrollTo({ top: 0, behavior: 'instant' });
+      }
+    };
+
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, []);
+
+  const handleSelectTab = (tab: NavTab) => {
+    soundService.playClick();
+    if (tab === activeTab) {
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+      return;
+    }
+    // Save current tab's scroll position
+    tabScrollPositions.current[activeTab] = window.scrollY;
+    tabHistoryRef.current.push(tab);
+    try {
+      window.history.pushState({ tab }, '', '');
+    } catch {}
+    setActiveTab(tab);
+    // Restore previous scroll position if returning, or open at top position
+    requestAnimationFrame(() => {
+      const savedPos = tabScrollPositions.current[tab];
+      if (typeof savedPos === 'number' && savedPos > 0) {
+        window.scrollTo({ top: savedPos, behavior: 'instant' });
+      } else {
+        window.scrollTo({ top: 0, behavior: 'instant' });
+      }
+    });
+  };
+
+  const handleCardClick = (cardId: string) => {
+    soundService.playClick();
+    if (cardId === 'watch' || cardId === 'learn' || cardId === 'tasks' || cardId === 'wallet') {
+      handleSelectTab(cardId as NavTab);
+    } else {
+      try {
+        window.history.pushState({ modal: cardId }, '', '');
+      } catch {}
+      setActiveModal(cardId as any);
+    }
+  };
 
   const [showDailyGoalsCalendarModal, setShowDailyGoalsCalendarModal] = useState(false);
   const [showAdvertiseModal, setShowAdvertiseModal] = useState(false);
+
+  useEffect(() => {
+    const handleOpenAdModal = () => setShowAdvertiseModal(true);
+    window.addEventListener('joyearn-open-advertise', handleOpenAdModal);
+    return () => window.removeEventListener('joyearn-open-advertise', handleOpenAdModal);
+  }, []);
 
   // Immersive Sticky Mode hook
   const { isImmersive, isTemporarilyRevealed, toggleImmersive, revealTemporarily } = useImmersiveMode();
@@ -434,6 +611,8 @@ export default function App() {
   const handleAndroidBack = () => {
     if (activeModal) {
       setActiveModal(null);
+    } else if (activeTab !== 'home') {
+      handleSelectTab('home');
     } else if (searchQuery) {
       setSearchQuery('');
     } else if (selectedCategory !== 'All') {
@@ -447,6 +626,7 @@ export default function App() {
 
   const handleAndroidHome = () => {
     setActiveModal(null);
+    handleSelectTab('home');
     setSearchQuery('');
     setShowRecentsSheet(false);
     window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -688,13 +868,19 @@ export default function App() {
     setShowConfetti(true);
   };
 
-  // Trigger Confetti effect when user hits daily goal of 5 completed activities
+  // Trigger Confetti effect & festive celebrations when user hits daily goal of 5 completed activities
+  const [isFifthActivityCelebration, setIsFifthActivityCelebration] = useState(false);
   const prevActivitiesCountRef = useRef(totalActivitiesCompleted);
   useEffect(() => {
     if (prevActivitiesCountRef.current < 5 && totalActivitiesCompleted >= 5) {
       soundService.playDailyGoalCheer();
       soundService.playStreakFlame();
       setShowConfetti(true);
+      setIsFifthActivityCelebration(true);
+      const timer = setTimeout(() => {
+        setIsFifthActivityCelebration(false);
+      }, 7000);
+      return () => clearTimeout(timer);
     }
     prevActivitiesCountRef.current = totalActivitiesCompleted;
   }, [totalActivitiesCompleted]);
@@ -990,8 +1176,25 @@ export default function App() {
       )
     : [];
 
-  // MANDATORY AUTH GATE: User must sign in or continue with Google to open this app interface
-  if (!currentUser) {
+  // AUTHENTICATION SPLASH: While authReady is false, show a full-screen splash with the JoyEarn logo and a spinner, never the login screen
+  if (!authReady) {
+    return (
+      <div className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-gradient-to-br from-rose-500 via-pink-600 to-rose-700 text-white p-6">
+        <div className="w-20 h-20 rounded-3xl bg-white/20 backdrop-blur-md flex items-center justify-center text-4xl shadow-xl animate-float">
+          🌸
+        </div>
+        <h1 className="font-black text-2xl mt-4 tracking-tight">JoyEarn</h1>
+        <p className="text-xs text-rose-100 font-medium mt-1">Safe • Family-Friendly • Genuine Rewards</p>
+        <div className="flex items-center gap-2.5 mt-6 px-4 py-2 rounded-full bg-white/15 backdrop-blur-sm border border-white/20">
+          <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+          <span className="text-xs font-bold text-white">Starting JoyEarn...</span>
+        </div>
+      </div>
+    );
+  }
+
+  // Show the Sign In screen ONLY when authReady is true and there is no user
+  if (authReady && !currentUser) {
     return (
       <FirstOpenAuthScreen
         onSuccessAuth={(user, bonus) => {
@@ -1009,18 +1212,36 @@ export default function App() {
 
   return (
     <div
-      className={`min-h-screen ${isDarkMode ? 'bg-slate-950 text-slate-100' : `bg-gradient-to-br ${theme.gradient} text-slate-800`} transition-colors duration-500 pb-8 flex flex-col items-center justify-start`}
+      className={`min-h-screen ${isDarkMode ? 'bg-slate-950 text-slate-100' : `bg-gradient-to-br ${theme.gradient} text-slate-800`} transition-colors duration-500 flex flex-col items-center justify-start`}
     >
       {/* Centered Mobile Shell with optional Android Phone Chassis Frame */}
       <div
-        className={`w-full max-w-md min-h-screen flex flex-col shadow-2xl relative ${isDarkMode ? 'bg-slate-900/90 text-slate-100' : 'bg-white/40 text-slate-800'} backdrop-blur-xs transition-all duration-300 ${
+        className={`w-full max-w-md min-h-screen flex flex-col shadow-2xl relative ${isDarkMode ? 'bg-slate-900 text-slate-100' : 'bg-white/80 text-slate-800'} ${
           androidFrameMode
             ? 'border-[12px] border-slate-950 rounded-[48px] overflow-hidden my-4 ring-8 ring-slate-800/30 shadow-2xl'
-            : 'border-x border-white/40'
+            : 'border-x border-slate-200/50'
         }`}
       >
-        {/* TOP STATUS BAR & CONTROLS */}
-        <header className="p-4 pb-2 flex items-center justify-between">
+        {/* Firestore Server Quota / Busy Banner */}
+        {serverBusyNotice && (
+          <div className="mx-3 mt-3 p-3 bg-amber-500/95 text-slate-950 text-xs font-black rounded-2xl shadow-lg border border-amber-400 flex items-center justify-between gap-2 z-50 animate-bounce">
+            <div className="flex items-center gap-2">
+              <span className="text-base">⏳</span>
+              <span>{serverBusyNotice}</span>
+            </div>
+            <button
+              onClick={() => setServerBusyNotice(null)}
+              className="text-slate-900 hover:text-black font-black text-sm px-1.5"
+            >
+              ✕
+            </button>
+          </div>
+        )}
+        {/* HOME DASHBOARD TAB VIEW */}
+        {activeTab === 'home' && (
+          <div className="flex flex-col w-full pb-28">
+            {/* TOP STATUS BAR & CONTROLS */}
+            <header className="px-4 pt-3 pb-2 flex items-center justify-between max-w-lg mx-auto w-full">
           {/* Brand Logo & Senior Mode */}
           <div className="flex items-center gap-2">
             <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-pink-500 to-amber-400 text-white flex items-center justify-center text-xl shadow-md animate-float">
@@ -1205,25 +1426,93 @@ export default function App() {
           </div>
         </header>
 
-        {/* CUTE AMBIENT DECORATIONS */}
-        <div className="px-4 py-1 flex items-center justify-between text-xs text-gray-500 select-none overflow-hidden">
-          <div className="flex items-center gap-2 text-sm animate-pulse-subtle">
-            <span>🌳</span>
-            <span>🌸</span>
-            <span>🦋</span>
-            <span>🐰</span>
-            <span>🌈</span>
-          </div>
-          <div className="flex items-center gap-2 text-sm">
-            <span>⭐</span>
-            <span>🎈</span>
-            <span>🏡</span>
-            <span>🚗</span>
-            <span>🐼</span>
-          </div>
-        </div>
+        {/* =========================================================================
+            SNAPCHAT-INSPIRED PREMIUM MINIMAL HOME DASHBOARD
+           ========================================================================= */}
 
-        {/* DAILY TASKS CARD: Top of Home with exactly 5 mandatory tasks resetting at midnight */}
+        {/* 1. HERO BALANCE CARD */}
+        <section className="px-4 py-2 max-w-lg mx-auto w-full">
+          <div
+            className={`bg-gradient-to-r from-pink-500 via-rose-500 to-pink-600 rounded-3xl p-5 text-white shadow-lg space-y-3.5 relative overflow-hidden transition-all duration-300 ${
+              pointsScaling ? 'scale-[1.02] ring-4 ring-pink-300/80 shadow-2xl' : 'scale-100'
+            }`}
+          >
+            <div className="flex justify-between items-start">
+              <div>
+                <span className="text-[11px] uppercase tracking-wider text-pink-100 font-extrabold flex items-center gap-1">
+                  <ShieldCheck className="w-3.5 h-3.5 text-pink-200" />
+                  <span>{effectiveUrdu ? 'موجودہ بیلنس' : 'Available Balance'}</span>
+                </span>
+                <div className="text-3xl font-black mt-1 flex items-baseline gap-2">
+                  <span>${(points / 1000).toFixed(2)}</span>
+                  <span className="text-xs font-bold text-pink-100">USD</span>
+                </div>
+                <div className="text-xs text-pink-100 font-bold mt-0.5">
+                  ⭐ {points.toLocaleString()} JoyPoints (1,000 Pts = $1.00 USD)
+                </div>
+              </div>
+
+              <div className="text-right">
+                <span className="text-[10px] uppercase font-bold text-pink-200 block">
+                  {effectiveUrdu ? 'آج حاصل کردہ' : "Today's Progress"}
+                </span>
+                <span className="text-sm font-black text-white">+{todayPoints} Pts</span>
+              </div>
+            </div>
+
+            {/* Status indicator with $100 Minimum & Progress Bar */}
+            <div className="pt-2 border-t border-white/20 space-y-1.5 text-xs text-pink-100">
+              <div className="flex items-center justify-between">
+                <span className="font-bold text-[11px]">
+                  {points >= 100000 ? (
+                    <span className="text-emerald-300 font-extrabold">✓ {effectiveUrdu ? 'کیش آؤٹ کے لیے تیار ($100)' : 'Eligible for $100 Cash Out'}</span>
+                  ) : (
+                    <span>{effectiveUrdu ? `مزید $${((100000 - points) / 1000).toFixed(2)} درکار ہے` : `Need $${((100000 - points) / 1000).toFixed(2)} more to reach $100`}</span>
+                  )}
+                </span>
+
+                <span className="text-[10px] bg-white/20 px-2 py-0.5 rounded-full font-bold">
+                  $100 Min Withdrawal
+                </span>
+              </div>
+
+              {/* Progress bar toward $100 */}
+              <div className="w-full bg-black/25 h-2 rounded-full overflow-hidden p-0.5 shadow-inner">
+                <div
+                  className="bg-gradient-to-r from-amber-300 to-emerald-300 h-full rounded-full transition-all duration-500"
+                  style={{ width: `${Math.min(100, Math.max(3, Math.round((points / 100000) * 100)))}%` }}
+                />
+              </div>
+            </div>
+
+            {/* Quick Actions */}
+            <div className="grid grid-cols-2 gap-2 pt-1">
+              <button
+                onClick={() => {
+                  soundService.playClick();
+                  handleSelectTab('wallet');
+                }}
+                className="py-2.5 bg-white text-rose-700 hover:bg-rose-50 font-black rounded-2xl text-xs flex items-center justify-center gap-1.5 tap-bounce shadow-sm"
+              >
+                <Wallet className="w-3.5 h-3.5 text-rose-600" />
+                <span>{effectiveUrdu ? 'رقم نکلوائیں' : 'Withdraw Funds'}</span>
+              </button>
+
+              <button
+                onClick={() => {
+                  soundService.playClick();
+                  setActiveModal('chest');
+                }}
+                className="py-2.5 bg-white/20 hover:bg-white/30 text-white font-black rounded-2xl text-xs flex items-center justify-center gap-1.5 tap-bounce border border-white/25"
+              >
+                <Gift className="w-3.5 h-3.5 text-amber-200" />
+                <span>{effectiveUrdu ? 'روزانہ سینہ' : 'Daily Streak Chest'}</span>
+              </button>
+            </div>
+          </div>
+        </section>
+
+        {/* 2. DAILY 5 MANDATORY TASKS CHECKLIST */}
         <DailyTasksCard
           completedTaskIds={completedDailyTaskIds}
           onTaskAction={(actionKey) => {
@@ -1231,9 +1520,9 @@ export default function App() {
               markMandatoryTaskDone('daily_checkin');
               handleEarnPoints(50, 'Daily Check-in 📅');
             } else if (actionKey === 'learn') {
-              setActiveModal('learn');
+              handleSelectTab('learn');
             } else if (actionKey === 'watch') {
-              setActiveModal('watch');
+              handleSelectTab('watch');
             } else if (actionKey === 'wheel') {
               setActiveModal('wheel');
             } else if (actionKey === 'chest') {
@@ -1250,561 +1539,218 @@ export default function App() {
           }}
         />
 
-        {/* DAILY GOALS WIDGET: Sits below Daily Tasks card, summarizes progress towards 5-activity daily threshold with clean horizontal progress bar and Rewards Ready indicator */}
-        <DailyGoalsWidget
-          completedActivitiesCount={dailyGoalCount}
-          streakDays={streakDays}
-          seniorMode={effectiveUrdu}
-          onOpenCalendarModal={() => setShowDailyGoalsCalendarModal(true)}
-          onRewardsReadyClick={() => {
-            setActiveModal('chest');
-            soundService.playDailyGoalCheer();
-          }}
-        />
-
-        {/* DIRECT SPONSOR ADS ON HOME (Clearly labelled "Sponsored", rotating, zero points) */}
-        <section className="px-4 py-1 space-y-1.5">
-          <RotatingSponsorAdCard variant="card" />
-
-          {/* Advertise with us Card at bottom of sponsored section */}
-          <div
-            onClick={() => {
-              soundService.playClick();
-              setShowAdvertiseModal(true);
-            }}
-            className="p-2.5 bg-gradient-to-r from-amber-50 to-orange-50 dark:from-slate-850 dark:to-slate-900 border border-amber-300 dark:border-amber-700/60 rounded-2xl flex items-center justify-between gap-2 cursor-pointer hover:border-amber-400 transition-all shadow-2xs tap-bounce"
-          >
-            <div className="flex items-center gap-2.5 min-w-0">
-              <div className="w-8 h-8 rounded-xl bg-amber-500/20 text-amber-700 dark:text-amber-400 flex items-center justify-center text-sm shrink-0">
-                📢
-              </div>
-              <div className="min-w-0">
-                <span className="font-black text-xs text-slate-900 dark:text-white block truncate">
-                  {effectiveUrdu ? 'ہمارے ساتھ تشہیر کریں' : 'Advertise with us'}
-                </span>
-                <p className="text-[10px] text-slate-500 dark:text-slate-400 truncate">
-                  {effectiveUrdu ? 'اپنی ایپ یا کاروبار کی تشہیر کریں' : 'Promote your app or business to active learners'}
-                </p>
-              </div>
-            </div>
-            <button
-              type="button"
-              className="shrink-0 px-2.5 py-1 bg-amber-500 hover:bg-amber-600 text-slate-950 font-black text-[10.5px] rounded-xl shadow-2xs flex items-center gap-1"
-            >
-              <span>{effectiveUrdu ? 'معلومات' : 'Enquire'}</span>
-              <ChevronRight className="w-3 h-3" />
-            </button>
-          </div>
-        </section>
-
-        {/* USER GREETING & FRIENDLY MASCOT BANNER */}
-        <section className="px-4 py-2">
-          <div className="bg-gradient-to-r from-pink-500/10 via-purple-500/10 to-emerald-500/10 border border-white/80 backdrop-blur-md rounded-2xl p-3 flex items-center gap-3 shadow-xs">
-            <div className="text-3xl animate-bounce-subtle shrink-0">
-              {theme.mascot}
-            </div>
-            <div className="flex-1 min-w-0">
-              <div className="flex items-center gap-1.5">
-                <span className={`font-black text-gray-900 ${seniorMode ? 'text-lg' : 'text-sm'}`}>
-                  {isUrdu ? `خوش آمدید، ${userName}! 👋` : `Welcome back, ${userName}! 👋`}
-                </span>
-              </div>
-              <p className={`text-xs text-gray-600 line-clamp-1 font-medium mt-0.5 ${seniorMode ? 'text-sm' : ''}`}>
-                {mascotQuote}
-              </p>
-            </div>
-            {/* User Dashboard Trigger */}
-            <button
-              onClick={() => {
-                soundService.playClick();
-                setActiveModal('dashboard');
-              }}
-              className="p-2 bg-gradient-to-r from-emerald-500 to-teal-600 text-white rounded-xl shadow-sm tap-bounce flex flex-col items-center shrink-0 hover:brightness-110"
-              title="Open User Activity & Earnings Dashboard"
-            >
-              <TrendingUp className="w-4 h-4" />
-              <span className="text-[9px] font-black uppercase">
-                {isUrdu ? 'ڈیش بورڈ' : 'Dashboard'}
-              </span>
-            </button>
-
-            {/* Daily Chest & Streak Days Display with Fire Animation */}
-            <button
-              onClick={() => setActiveModal('chest')}
-              className={`p-2 rounded-xl shadow-sm tap-bounce flex flex-col items-center shrink-0 relative transition-all duration-500 ${
-                quizStreakFireAnim
-                  ? 'bg-gradient-to-tr from-red-600 via-orange-500 to-amber-400 text-white shadow-xl shadow-orange-500/50 scale-110 ring-4 ring-amber-300 animate-pulse'
-                  : 'bg-gradient-to-r from-amber-400 to-orange-400 text-white'
-              }`}
-              title="Open Daily Reward Chest"
-            >
-              {quizStreakFireAnim ? (
-                <Flame className="w-4 h-4 text-amber-200 fill-amber-300 animate-bounce" />
-              ) : (
-                <Gift className="w-4 h-4 animate-bounce" />
-              )}
-              <span className="text-[9px] font-black uppercase flex items-center gap-0.5">
-                {quizStreakFireAnim && <span>🔥</span>}
-                <span>{isUrdu ? `دن ${streakDays}` : `Day ${streakDays}`}</span>
-              </span>
-              {quizStreakFireAnim && (
-                <>
-                  <span className="absolute -top-1 -right-1 text-xs animate-spin-slow">✨</span>
-                  <span className="absolute -bottom-1 -left-1 text-xs animate-bounce">🔥</span>
-                </>
-              )}
-            </button>
-
-            {/* Lucky Wheel Quick Trigger */}
-            <button
-              onClick={() => setActiveModal('wheel')}
-              className={`p-2 bg-gradient-to-r ${
-                hasSpunWheelToday
-                  ? 'from-slate-400 to-slate-500 opacity-90'
-                  : 'from-violet-500 via-fuchsia-500 to-pink-500 animate-pulse-subtle'
-              } text-white rounded-xl shadow-sm tap-bounce flex flex-col items-center shrink-0`}
-              title="Spin Lucky Wheel for Daily Bonus Points"
-            >
-              <span className="text-base leading-none">🎡</span>
-              <span className="text-[9px] font-black uppercase mt-0.5">
-                {hasSpunWheelToday ? (effectiveUrdu ? 'مکمل' : 'Done') : (effectiveUrdu ? 'اسپن' : 'Spin')}
-              </span>
-            </button>
-          </div>
-        </section>
-
-        {/* ACTIVITY GOALS COMPONENT: 5-ACTIVITY PROGRESS RING & CLAIM REWARD INTERACTION */}
-        <section className="px-4 py-1.5">
-          <ActivityGoals
-            completedActivitiesCount={totalActivitiesCompleted}
-            target={5}
-            quizCompleted={completedQuizzesCount > 0}
-            videoWatched={watchedVideosCount > 0}
-            wheelSpun={hasSpunWheelToday}
-            chestClaimed={claimedChestToday}
-            taskCompleted={activeReferralsCount > 0}
-            onOpenQuiz={() => setActiveModal('learn')}
-            onOpenVideos={() => setActiveModal('watch')}
-            onOpenWheel={() => setActiveModal('wheel')}
-            onOpenChest={() => setActiveModal('chest')}
-            onOpenTasks={() => setActiveModal('tasks')}
-            onClaimGoalReward={(bonusPoints) => {
-              handleEarnPoints(bonusPoints, '5/5 Daily Activity Goal Completed 🎯');
-              handleTriggerConfetti();
-            }}
-            seniorMode={effectiveUrdu}
-            currentPoints={points}
-          />
-        </section>
-
-        {/* REWARD BALANCE DISPLAY CARD */}
-        <section className="px-4 py-2">
-          <div className="bg-gradient-to-br from-amber-500 via-orange-500 to-rose-600 rounded-3xl p-5 text-white shadow-xl space-y-4 relative overflow-hidden">
-            {/* Background shimmer visual */}
-            <div className="absolute -right-8 -top-8 w-32 h-32 rounded-full bg-white/10 blur-xl pointer-events-none" />
-
-            <div className="flex justify-between items-start">
-              <div>
-                <span className="text-[11px] uppercase tracking-wider text-amber-100 font-bold flex items-center gap-1">
-                  <ShieldCheck className="w-3.5 h-3.5 text-amber-200" />
-                  {isUrdu ? 'موجودہ جوائے پوائنٹس بیلنس' : 'Available JoyPoints'}
-                </span>
-                <div className="text-3xl font-black mt-1 flex items-baseline gap-1.5">
-                  <span>⭐ {points.toLocaleString()}</span>
-                  <span className="text-xs font-semibold text-amber-200">JoyPoints</span>
-                </div>
-                {/* Clear Policy Disclaimer Tag */}
-                <div className="flex items-center gap-1.5 mt-1">
-                  <span className="text-[10px] font-black text-amber-950 bg-amber-200/90 px-2 py-0.5 rounded-lg shadow-2xs">
-                    Ad-Funded Rewards
-                  </span>
-                  <span className="text-[10px] text-amber-100 font-medium opacity-90">
-                    Redeem for Payouts in Wallet
-                  </span>
-                </div>
-              </div>
-
-              {/* Status pill */}
-              <div
-                onClick={() => setActiveModal('wallet')}
-                className="bg-white/15 hover:bg-white/25 border border-white/20 px-3 py-1.5 rounded-2xl cursor-pointer backdrop-blur-md tap-bounce text-right"
-              >
-                <span className="text-[10px] text-amber-100 block font-semibold">
-                  {isUrdu ? 'پوائنٹ سسٹم' : 'Reward Currency'}
-                </span>
-                <span className="text-xs font-black text-white">Redeemable</span>
-              </div>
-            </div>
-
-            {/* Today's Tracker & Conversion Note */}
-            <div className="pt-3 border-t border-white/20 flex items-center justify-between text-xs text-amber-100">
-              <div>
-                <span className="opacity-80">{isUrdu ? 'آج حاصل کردہ: ' : "Today's Progress: "}</span>
-                <strong className="text-white font-extrabold">+{todayPoints} JoyPoints</strong>
-              </div>
-              <div className="text-[10px] opacity-90 bg-black/20 px-2.5 py-0.5 rounded-full font-bold">
-                1,000 Pts = $1.00 USD
-              </div>
-            </div>
-
-            {/* Quick Actions: Personal Dashboard, Streak Board, Wallet Store, Garden */}
-            <div className="flex gap-2 pt-1">
-              <button
-                onClick={() => {
-                  soundService.playClick();
-                  setActiveModal('dashboard');
-                }}
-                className="flex-1 py-2.5 bg-white text-emerald-950 font-black rounded-xl shadow text-xs flex items-center justify-center gap-1.5 tap-bounce hover:bg-emerald-50"
-              >
-                <TrendingUp className="w-3.5 h-3.5 text-emerald-600" />
-                <span>{isUrdu ? 'ڈیش بورڈ' : "Dashboard"}</span>
-              </button>
-              <button
-                onClick={() => {
-                  soundService.playClick();
-                  setShowStreakLeaderboard(true);
-                }}
-                className={`py-2.5 px-3 border rounded-xl text-xs flex items-center gap-1 tap-bounce transition-all ${
-                  quizStreakFireAnim
-                    ? 'bg-gradient-to-r from-red-600 via-orange-500 to-amber-500 text-white border-amber-300 font-black shadow-lg shadow-orange-500/40 animate-pulse scale-105'
-                    : 'bg-white/20 hover:bg-white/30 border-white/30 text-white font-extrabold'
-                }`}
-                title="Global Streak Leaderboard"
-              >
-                <span className={quizStreakFireAnim ? 'animate-bounce text-sm' : ''}>🔥</span>
-                <span>{isUrdu ? 'اسٹریک بورڈ' : 'Streak Board'}</span>
-              </button>
-              <button
-                onClick={() => {
-                  soundService.playClick();
-                  setActiveModal('wallet');
-                }}
-                className="py-2.5 px-3 bg-white/20 hover:bg-white/30 border border-white/30 text-white font-extrabold rounded-xl text-xs flex items-center gap-1 tap-bounce"
-                title="Open Perks Store & In-App Shop"
-              >
-                <Gift className="w-3.5 h-3.5" />
-                <span>{isUrdu ? 'والیٹ' : 'Wallet'}</span>
-              </button>
-              <button
-                onClick={() => {
-                  soundService.playClick();
-                  setActiveModal('garden');
-                }}
-                className="py-2.5 px-2.5 bg-white/20 hover:bg-white/30 border border-white/30 text-white font-extrabold rounded-xl text-xs flex items-center gap-1 tap-bounce"
-                title="Visit Your Virtual Garden"
-              >
-                <Flower2 className="w-3.5 h-3.5" />
-                <span>{isUrdu ? 'باغ' : 'Garden'}</span>
-              </button>
-            </div>
-          </div>
-        </section>
-
-
-
-        {/* LARGE "START EARNING" QUICK-START HERO BUTTON */}
-        <section className="px-4 py-2">
-          <button
-            onClick={() => setActiveModal('watch')}
-            className="w-full py-4 bg-gradient-to-r from-pink-500 via-rose-500 to-amber-500 text-white rounded-3xl font-black text-base shadow-lg shadow-pink-500/25 flex items-center justify-between px-6 tap-bounce hover:brightness-105"
-          >
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-2xl bg-white/20 flex items-center justify-center text-2xl">
-                🚀
-              </div>
-              <div className="text-left">
-                <span className="block text-xs uppercase tracking-widest text-pink-100 font-bold">
-                  {isUrdu ? 'ویڈیوز • تعلیم • کھیلیں' : 'Watch • Learn • Play'}
-                </span>
-                <span className={seniorMode ? 'text-xl' : 'text-lg'}>
-                  {isUrdu ? 'سیکھنا اور پوائنٹس حاصل کریں' : 'PLAY & EARN POINTS'}
-                </span>
-              </div>
-            </div>
-            <div className="w-8 h-8 rounded-full bg-white/25 flex items-center justify-center">
-              <ChevronRight className="w-5 h-5 stroke-[3]" />
-            </div>
-          </button>
-        </section>
-
-        {/* SEARCH BAR & CATEGORY QUICK FILTERS */}
-        <section className="px-4 py-2 space-y-2.5">
-          {/* Main Search Input */}
-          <div className="relative flex items-center">
-            <div className="absolute left-3.5 flex items-center pointer-events-none text-gray-400">
-              <Search className="w-4 h-4 text-pink-500" />
-            </div>
-            <input
-              type="text"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder={
-                isUrdu
-                  ? 'سرگرمیاں، ٹاسک، کوئز، یا ویڈیوز تلاش کریں...'
-                  : 'Search activities, tasks, quizzes, games...'
-              }
-              className={`w-full pl-10 pr-9 py-3 bg-white/90 border-2 border-pink-200/90 rounded-2xl shadow-sm text-gray-800 placeholder-gray-400 focus:outline-none focus:border-pink-500 focus:ring-2 focus:ring-pink-200 transition-all ${
-                seniorMode ? 'text-base font-semibold' : 'text-xs font-medium'
-              }`}
-            />
-            {searchQuery && (
-              <button
-                onClick={() => setSearchQuery('')}
-                className="absolute right-3 p-1 rounded-full bg-gray-100 hover:bg-gray-200 text-gray-500 tap-bounce"
-                title="Clear search"
-              >
-                <X className="w-3.5 h-3.5" />
-              </button>
-            )}
-          </div>
-
-          {/* Quick Category Filter Pills */}
-          <div className="flex gap-1.5 overflow-x-auto no-scrollbar py-0.5">
-            {CATEGORY_TABS.map((tab) => {
-              const isSelected = selectedCategory === tab.id;
-              return (
-                <button
-                  key={tab.id}
-                  onClick={() => setSelectedCategory(tab.id)}
-                  className={`px-3 py-1.5 rounded-full text-xs font-bold whitespace-nowrap transition-all flex items-center gap-1 tap-bounce ${
-                    isSelected
-                      ? 'bg-gradient-to-r from-pink-500 to-rose-500 text-white shadow-sm scale-105'
-                      : 'bg-white/80 hover:bg-white text-gray-600 border border-gray-200'
-                  }`}
-                >
-                  <span>{tab.emoji}</span>
-                  <span>{isUrdu && tab.urduLabel ? tab.urduLabel : tab.label}</span>
-                </button>
-              );
-            })}
-          </div>
-
-          {/* Search Query Feedback & Clear Helper */}
-          {(searchQuery || selectedCategory !== 'All') && (
-            <div className="flex items-center justify-between text-xs px-1 text-gray-600">
-              <span>
-                {isUrdu ? (
-                  <>کل <strong>{filteredCards.length}</strong> آئٹمز ملے {searchQuery && <>برائے "<span className="text-pink-600 font-bold">{searchQuery}</span>"</>}</>
-                ) : (
-                  <>Found <strong>{filteredCards.length}</strong> {filteredCards.length === 1 ? 'module' : 'modules'} {searchQuery && <> for "<span className="text-pink-600 font-bold">{searchQuery}</span>"</>}</>
-                )}
-                {selectedCategory !== 'All' && <> in <strong>{selectedCategory}</strong></>}
-              </span>
-              <button
-                onClick={() => {
-                  setSearchQuery('');
-                  setSelectedCategory('All');
-                }}
-                className="text-[11px] font-bold text-pink-600 hover:text-pink-800 underline"
-              >
-                {isUrdu ? 'تمام بحال کریں' : 'Reset All'}
-              </button>
-            </div>
-          )}
-
-          {/* Direct Hit Task Match Suggestion */}
-          {directMatchingTasks.length > 0 && (
-            <div
-              onClick={() => setActiveModal('tasks')}
-              className="p-2.5 bg-amber-50 border border-amber-300 rounded-2xl cursor-pointer hover:bg-amber-100/80 transition-all text-xs text-amber-950 flex items-center justify-between tap-bounce"
-            >
-              <div className="flex items-center gap-2 truncate">
-                <span className="text-base">📝</span>
-                <div className="truncate">
-                  <span className="text-[10px] font-bold uppercase tracking-wider text-amber-800 block">
-                    Direct Task Match
-                  </span>
-                  <p className="font-bold truncate text-xs">{directMatchingTasks[0].title}</p>
-                </div>
-              </div>
-              <span className="shrink-0 text-xs font-black text-amber-700 bg-white px-2 py-0.5 rounded-full border border-amber-200">
-                +{directMatchingTasks[0].points} Pts →
-              </span>
-            </div>
-          )}
-
-          {/* Direct Hit Video Match Suggestion */}
-          {directMatchingVideos.length > 0 && (
-            <div
-              onClick={() => setActiveModal('watch')}
-              className="p-2.5 bg-rose-50 border border-rose-300 rounded-2xl cursor-pointer hover:bg-rose-100/80 transition-all text-xs text-rose-950 flex items-center justify-between tap-bounce"
-            >
-              <div className="flex items-center gap-2 truncate">
-                <div className="w-16 shrink-0 rounded-lg overflow-hidden shadow-2xs">
-                  <VideoThumbnail
-                    videoUrl={directMatchingVideos[0].videoUrl}
-                    title={directMatchingVideos[0].title}
-                  />
-                </div>
-                <div className="truncate">
-                  <span className="text-[10px] font-bold uppercase tracking-wider text-rose-800 block">
-                    Direct Video Match
-                  </span>
-                  <p className="font-bold truncate text-xs">{directMatchingVideos[0].title}</p>
-                </div>
-              </div>
-              <span className="shrink-0 text-xs font-black text-rose-700 bg-white px-2 py-0.5 rounded-full border border-rose-200">
-                +{directMatchingVideos[0].points} Pts →
-              </span>
-            </div>
-          )}
-        </section>
-
-        {/* 2-COLUMN ANIMATED ACTIVITY CARDS GRID */}
-        <section className="px-4 py-2 flex-1">
-          <div className="flex items-center justify-between mb-2">
-            <h2 className={`font-black text-gray-900 ${seniorMode ? 'text-xl' : 'text-sm'}`}>
-              {seniorMode ? 'تمام سرگرمیاں (Activities)' : 'Available Activities'}
+        {/* 3. SNAPCHAT 4-CARD FEATURE GRID */}
+        <section className="px-4 py-2 max-w-lg mx-auto w-full">
+          <div className="flex items-center justify-between mb-2.5 px-0.5">
+            <h2 className="font-black text-slate-800 text-sm uppercase tracking-wider">
+              {effectiveUrdu ? 'اہم سرگرمیاں' : 'Core Activities'}
             </h2>
-            <span className="text-[11px] font-semibold text-gray-500">
-              {filteredCards.length} of {ACTIVITY_CARDS.length} Modules
+            <span className="text-[11px] font-bold text-pink-600">
+              Verified & Safe
             </span>
           </div>
 
-          {filteredCards.length === 0 ? (
-            /* Empty State when Search has no matches */
-            <div className="bg-white/90 border-2 border-dashed border-pink-200 rounded-3xl p-6 text-center space-y-3 my-2">
-              <span className="text-5xl block animate-bounce-subtle">🔎🐰</span>
-              <h3 className="font-bold text-gray-800 text-sm">
-                No activities match "{searchQuery}"
-              </h3>
-              <p className="text-xs text-gray-500 max-w-xs mx-auto">
-                Try searching for words like <span className="font-semibold text-pink-600">"quiz"</span>, <span className="font-semibold text-pink-600">"game"</span>, <span className="font-semibold text-pink-600">"video"</span>, <span className="font-semibold text-pink-600">"perks"</span>, or <span className="font-semibold text-pink-600">"fun"</span>.
-              </p>
-              <button
-                onClick={() => {
-                  setSearchQuery('');
-                  setSelectedCategory('All');
-                }}
-                className="px-4 py-2 bg-pink-500 text-white rounded-xl text-xs font-bold tap-bounce hover:bg-pink-600 shadow-sm"
-              >
-                Clear Search & Show All
-              </button>
+          <div className="grid grid-cols-2 gap-3">
+            {/* Card 1: Watch & Learn */}
+            <div
+              onClick={() => {
+                soundService.playClick();
+                handleSelectTab('watch');
+              }}
+              className="bg-white rounded-3xl p-4 border border-slate-200/90 shadow-2xs hover:shadow-md hover:border-pink-300 transition-all cursor-pointer tap-bounce flex flex-col justify-between group min-h-[140px]"
+            >
+              <div className="flex items-start justify-between">
+                <div className="w-11 h-11 rounded-2xl bg-pink-50 flex items-center justify-center text-2xl group-hover:scale-110 transition-transform">
+                  🎬
+                </div>
+                <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-pink-100 text-pink-700">
+                  +25 Pts
+                </span>
+              </div>
+              <div className="mt-3">
+                <h3 className="font-black text-slate-900 text-xs sm:text-sm">
+                  {effectiveUrdu ? 'ویڈیوز دیکھیں' : 'Watch Videos'}
+                </h3>
+                <p className="text-[11px] text-slate-500 mt-0.5 line-clamp-1">
+                  {effectiveUrdu ? 'محفوظ خاندانی ویڈیوز' : 'Family arts, DIY & science'}
+                </p>
+              </div>
             </div>
-          ) : (
-            <div className="grid grid-cols-2 gap-3">
-              {filteredCards.map((card) => {
-                return (
-                  <div
-                    key={card.id}
-                    onClick={() => setActiveModal(card.id)}
-                    className={`bg-white/95 rounded-3xl p-3.5 border-2 ${card.border} shadow-sm hover:shadow-md transition-all cursor-pointer tap-bounce flex flex-col justify-between relative overflow-hidden group`}
-                  >
-                    {/* Top Row: Emoji, Badge & Share Button */}
-                    <div className="flex items-start justify-between">
-                      <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-gray-50 to-gray-100 border border-gray-100 flex items-center justify-center text-2xl shadow-inner group-hover:scale-110 transition-transform">
-                        {card.emoji}
-                      </div>
-                      <div className="flex items-center gap-1.5">
-                        <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800">
-                          {card.badge}
-                        </span>
-                        <button
-                          onClick={(e) => handleShareCard(e, card)}
-                          title="Share activity with friends"
-                          className="p-1 rounded-full bg-slate-100 hover:bg-pink-100 text-slate-500 hover:text-pink-600 transition-colors tap-bounce"
-                        >
-                          <Share2 className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
-                    </div>
 
-                    {/* Details */}
-                    <div className="mt-3">
-                      <h3 className={`font-black text-gray-900 ${seniorMode ? 'text-lg' : 'text-sm'}`}>
-                        {seniorMode && card.urduTitle ? card.urduTitle : card.title}
-                      </h3>
-                      <p className={`text-[11px] text-gray-500 line-clamp-1 mt-0.5 ${seniorMode ? 'text-xs' : ''}`}>
-                        {card.subtitle}
-                      </p>
-                    </div>
-
-                    {/* Visual Progress Bar */}
-                    <div className="mt-3 pt-2 border-t border-gray-100 space-y-1">
-                      <div className="flex items-center justify-between text-[10px]">
-                        <span className="font-bold text-gray-600 truncate mr-1 flex items-center gap-1">
-                          {card.isComplete ? (
-                            <span className="text-emerald-600 font-black">✓</span>
-                          ) : null}
-                          <span>
-                            {seniorMode && card.progressUrdu ? card.progressUrdu : card.progressText}
-                          </span>
-                        </span>
-                        <span
-                          className={`font-black shrink-0 ${
-                            card.progressPct >= 100 ? 'text-emerald-600' : 'text-pink-600'
-                          }`}
-                        >
-                          {card.progressPct}%
-                        </span>
-                      </div>
-                      <div className="w-full h-1.5 bg-gray-100 rounded-full overflow-hidden border border-gray-200/50">
-                        <div
-                          className={`h-full rounded-full transition-all duration-500 ${
-                            card.progressPct >= 100
-                              ? 'bg-emerald-500 shadow-sm'
-                              : 'bg-gradient-to-r from-pink-500 via-rose-500 to-amber-400'
-                          }`}
-                          style={{ width: `${Math.min(100, Math.max(card.progressPct, 4))}%` }}
-                        />
-                      </div>
-                    </div>
-
-                    {/* Bottom indicator with Share button */}
-                    <div className="mt-2.5 pt-1.5 border-t border-gray-100/60 flex items-center justify-between text-[11px] font-bold text-gray-400">
-                      <button
-                        onClick={(e) => handleShareCard(e, card)}
-                        className="flex items-center gap-1 text-[10px] font-bold text-pink-600 hover:text-pink-700 bg-pink-50 hover:bg-pink-100 px-2 py-0.5 rounded-full transition-colors tap-bounce"
-                      >
-                        <Share2 className="w-3 h-3" />
-                        <span>{seniorMode ? 'شیئر کریں' : 'Share'}</span>
-                      </button>
-                      <div className="flex items-center gap-0.5 group-hover:text-pink-600 transition-colors">
-                        <span>{seniorMode ? 'کھولیں' : 'Open'}</span>
-                        <ChevronRight className="w-3.5 h-3.5" />
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
+            {/* Card 2: Alphabet & Numbers */}
+            <div
+              onClick={() => {
+                soundService.playClick();
+                handleSelectTab('learn');
+              }}
+              className="bg-white rounded-3xl p-4 border border-slate-200/90 shadow-2xs hover:shadow-md hover:border-pink-300 transition-all cursor-pointer tap-bounce flex flex-col justify-between group min-h-[140px]"
+            >
+              <div className="flex items-start justify-between">
+                <div className="w-11 h-11 rounded-2xl bg-indigo-50 flex items-center justify-center text-2xl group-hover:scale-110 transition-transform">
+                  📚
+                </div>
+                <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-700">
+                  A-Z & 1-100
+                </span>
+              </div>
+              <div className="mt-3">
+                <h3 className="font-black text-slate-900 text-xs sm:text-sm">
+                  {effectiveUrdu ? 'حروف اور گنتی' : 'Learn A–Z & 1–100'}
+                </h3>
+                <p className="text-[11px] text-slate-500 mt-0.5 line-clamp-1">
+                  {effectiveUrdu ? 'مکمل ۲۶ حروف اور ۱۰۰ نمبرز' : 'Complete 26 letters & numbers'}
+                </p>
+              </div>
             </div>
-          )}
+
+            {/* Card 3: Daily Quiz */}
+            <div
+              onClick={() => {
+                soundService.playClick();
+                handleSelectTab('learn');
+              }}
+              className="bg-white rounded-3xl p-4 border border-slate-200/90 shadow-2xs hover:shadow-md hover:border-pink-300 transition-all cursor-pointer tap-bounce flex flex-col justify-between group min-h-[140px]"
+            >
+              <div className="flex items-start justify-between">
+                <div className="w-11 h-11 rounded-2xl bg-amber-50 flex items-center justify-center text-2xl group-hover:scale-110 transition-transform">
+                  🧠
+                </div>
+                <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-amber-100 text-amber-800">
+                  +50 Pts
+                </span>
+              </div>
+              <div className="mt-3">
+                <h3 className="font-black text-slate-900 text-xs sm:text-sm">
+                  {effectiveUrdu ? 'روزانہ کوئز' : 'Daily Quiz'}
+                </h3>
+                <p className="text-[11px] text-slate-500 mt-0.5 line-clamp-1">
+                  {effectiveUrdu ? '۵ روزانہ تعلیمی سوالات' : '5 questions each day'}
+                </p>
+              </div>
+            </div>
+
+            {/* Card 4: Lucky Bonus Wheel */}
+            <div
+              onClick={() => {
+                soundService.playClick();
+                setActiveModal('wheel');
+              }}
+              className="bg-white rounded-3xl p-4 border border-slate-200/90 shadow-2xs hover:shadow-md hover:border-pink-300 transition-all cursor-pointer tap-bounce flex flex-col justify-between group min-h-[140px]"
+            >
+              <div className="flex items-start justify-between">
+                <div className="w-11 h-11 rounded-2xl bg-purple-50 flex items-center justify-center text-2xl group-hover:scale-110 transition-transform">
+                  🎡
+                </div>
+                <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-purple-100 text-purple-700">
+                  Free Spin
+                </span>
+              </div>
+              <div className="mt-3">
+                <h3 className="font-black text-slate-900 text-xs sm:text-sm">
+                  {effectiveUrdu ? 'لکی وہیل' : 'Lucky Wheel'}
+                </h3>
+                <p className="text-[11px] text-slate-500 mt-0.5 line-clamp-1">
+                  {effectiveUrdu ? 'روزانہ مفت بونس پوائنٹس' : 'Daily bonus points spin'}
+                </p>
+              </div>
+            </div>
+          </div>
         </section>
 
-        {/* TOP 10 EARNERS LEADERBOARD SECTION */}
-        <TopEarnersSection
-          currentPoints={points}
-          userName={userName}
-          streakDays={streakDays}
-          seniorMode={effectiveUrdu}
-          onOpenActivity={(id) => setActiveModal(id as any)}
-        />
+        {/* 4. TODAY'S FEATURED VIDEO SPOTLIGHT */}
+        <section className="px-4 py-2 max-w-lg mx-auto w-full">
+          <div className="bg-white rounded-3xl p-4 border border-slate-200/90 shadow-2xs space-y-3">
+            <div className="flex items-center justify-between text-xs">
+              <span className="text-[10px] font-black uppercase tracking-wider text-pink-600 bg-pink-50 px-2.5 py-0.5 rounded-full border border-pink-100">
+                {effectiveUrdu ? 'آج کی نمایاں ویڈیو' : "Today's Featured Video"}
+              </span>
+              <span className="text-amber-600 font-extrabold text-[11px] flex items-center gap-1">
+                <Sparkles className="w-3.5 h-3.5 text-amber-500" />
+                <span>+25 JoyPoints</span>
+              </span>
+            </div>
 
-        {/* ACHIEVEMENTS & BADGES SECTION */}
-        <AchievementsSection
-          completedTasksCount={completedTasksCount}
-          completedQuizzesCount={completedQuizzesCount}
-          watchedVideosCount={watchedVideosCount}
-          activeReferralsCount={activeReferralsCount}
-          streakDays={streakDays}
-          gamesCompletedCount={gamesCompletedCount}
-          seniorMode={effectiveUrdu}
-          userName={userName}
-          totalPoints={points}
-        />
+            <div
+              onClick={() => {
+                soundService.playClick();
+                handleSelectTab('watch');
+              }}
+              className="flex items-center gap-3.5 cursor-pointer group"
+            >
+              <div className="w-24 aspect-video rounded-2xl overflow-hidden shrink-0 shadow-2xs relative bg-slate-900">
+                <img
+                  src={WATCH_PAGE_VIDEOS[0]?.thumbnail || 'https://images.unsplash.com/photo-1513364776144-60967b0f800f?w=600&auto=format&fit=crop&q=80'}
+                  alt="Featured Video"
+                  className="w-full h-full object-cover group-hover:scale-105 transition-transform"
+                />
+                <div className="absolute inset-0 bg-black/25 flex items-center justify-center">
+                  <Play className="w-4 h-4 fill-white text-white ml-0.5" />
+                </div>
+              </div>
 
-        {/* MORE APPS AND OFFERS (SPONSORED PROMOTIONS) */}
-        <PromotedOffersSection
-          seniorMode={effectiveUrdu}
-        />
+              <div className="flex-1 min-w-0">
+                <h3 className="text-xs sm:text-sm font-black text-slate-900 line-clamp-1 group-hover:text-pink-600 transition-colors">
+                  {WATCH_PAGE_VIDEOS[0]?.title || 'Easy Clay Modeling & Sculpting for Beginners'}
+                </h3>
+                <p className="text-[11px] text-slate-500 mt-0.5 line-clamp-1">
+                  {WATCH_PAGE_VIDEOS[0]?.author || 'JoyEarn Creative Studio'} • {WATCH_PAGE_VIDEOS[0]?.duration || '3:45'}
+                </p>
+                <span className="inline-flex items-center gap-1 text-[11px] font-black text-pink-600 mt-1">
+                  <span>{effectiveUrdu ? 'ابھی دیکھیں' : 'Watch Now'}</span>
+                  <ChevronRight className="w-3 h-3" />
+                </span>
+              </div>
+            </div>
+          </div>
+        </section>
 
-        {/* GOOGLE ADMOB BANNER (HOME SCREEN) */}
-        <AdMobBanner
-          seniorMode={effectiveUrdu}
-        />
+        {/* 5. JOYLUDO ROYAL & MINI-GAMES SPOTLIGHT BANNER */}
+        <section className="px-4 py-2 max-w-lg mx-auto w-full">
+          <div
+            onClick={() => {
+              soundService.playClick();
+              setActiveModal('ludo');
+            }}
+            className="bg-gradient-to-r from-rose-500 via-pink-600 to-amber-500 text-white rounded-3xl p-4 shadow-md hover:shadow-xl transition-all cursor-pointer tap-bounce border-2 border-amber-300 relative overflow-hidden group"
+          >
+            <div className="absolute top-0 right-0 bg-amber-400 text-amber-950 font-black text-[9.5px] px-3 py-0.5 rounded-bl-2xl uppercase tracking-wider shadow-xs">
+              👑 {effectiveUrdu ? 'نئی لودو شامل' : 'New Ludo Game'}
+            </div>
+
+            <div className="flex items-center gap-3.5">
+              <div className="w-14 h-14 rounded-2xl bg-white/20 backdrop-blur-xs flex items-center justify-center text-3xl shadow-inner group-hover:scale-110 transition-transform">
+                🎲
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2">
+                  <h3 className="font-black text-base text-white">
+                    JoyLudo Royal
+                  </h3>
+                  <span className="text-[10px] font-black bg-white text-rose-600 px-2 py-0.2 rounded-full shadow-xs">
+                    +100 Pts
+                  </span>
+                </div>
+                <p className="text-xs text-rose-100 mt-0.5 line-clamp-1">
+                  {effectiveUrdu
+                    ? 'اصلی ۱۵×۱۵ لودو • روبوٹ کے خلاف یا دوستوں کے ساتھ کھیلیں'
+                    : 'Classic 15x15 Ludo with 3D rolling dice & token cutting!'}
+                </p>
+                <div className="flex items-center gap-2 mt-2">
+                  <span className="text-[11px] font-black text-amber-200 group-hover:text-white transition-colors flex items-center gap-1">
+                    <span>{effectiveUrdu ? 'ابھی لودو کھیلیں' : 'Play Ludo Now'}</span>
+                    <ChevronRight className="w-3.5 h-3.5" />
+                  </span>
+                  <span className="text-[10px] text-white/80 font-bold">
+                    • 100% Free
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
 
         {/* HONESTY, POLICY & TRANSPARENCY FOOTER BANNER */}
-        <footer className="p-4 pt-2 space-y-2">
+        <footer className="px-4 py-3 space-y-2 max-w-lg mx-auto w-full">
           <div className="bg-white/80 border border-gray-200/80 rounded-2xl p-3 text-center space-y-1">
             <div className="flex items-center justify-center gap-1.5 text-xs font-bold text-gray-700">
               <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
@@ -1844,76 +1790,47 @@ export default function App() {
 
         {/* POLICY-COMPLIANT GOOGLE ADMOB FAMILY BANNER */}
         {!hasAdFree && (
-          <div className="bg-slate-100 border-t border-slate-200/90 py-1.5 px-3 flex items-center justify-between text-[11px] text-slate-500">
-            <div className="flex items-center gap-1.5 font-bold text-slate-600">
-              <span className="bg-slate-300 text-slate-700 px-1 py-0.2 rounded text-[9px] uppercase font-black">
-                Ad
-              </span>
-              <span>Google AdMob • Family-Safe Learning Partner</span>
+          <div className="max-w-lg mx-auto w-full px-3">
+            <div className="bg-slate-100 rounded-2xl border border-slate-200/90 py-1.5 px-3 flex items-center justify-between text-[11px] text-slate-500">
+              <div className="flex items-center gap-1.5 font-bold text-slate-600">
+                <span className="bg-slate-300 text-slate-700 px-1 py-0.2 rounded text-[9px] uppercase font-black">
+                  Ad
+                </span>
+                <span>Google AdMob • Family-Safe Learning Partner</span>
+              </div>
+              <button
+                onClick={() => handleSelectTab('wallet')}
+                className="text-blue-600 font-extrabold hover:underline tap-bounce"
+              >
+                Remove Ads ($1.99)
+              </button>
             </div>
-            <button
-              onClick={() => setActiveModal('wallet')}
-              className="text-blue-600 font-extrabold hover:underline tap-bounce"
-            >
-              Remove Ads ($1.99)
-            </button>
+          </div>
+        )}
           </div>
         )}
 
-        {/* ANDROID MATERIAL 3 BOTTOM NAVIGATION BAR & 3-BUTTON SYSTEM BAR */}
-        <div className="sticky bottom-0 z-30 shadow-2xl">
-          <AndroidBottomNav
-            activeTab={
-              activeModal === 'watch'
-                ? 'watch'
-                : activeModal === 'learn'
-                ? 'learn'
-                : activeModal === 'tasks'
-                ? 'tasks'
-                : activeModal === 'wallet'
-                ? 'wallet'
-                : 'home'
-            }
-            onSelectTab={(tab) => {
-              if (tab === 'home') {
-                setActiveModal(null);
-                window.scrollTo({ top: 0, behavior: 'smooth' });
-              } else if (tab === 'watch') {
-                setActiveModal('watch');
-              } else if (tab === 'learn') {
-                setActiveModal('learn');
-              } else if (tab === 'tasks') {
-                setActiveModal('tasks');
-              } else if (tab === 'wallet') {
-                setActiveModal('wallet');
-              }
-            }}
-            seniorMode={effectiveUrdu}
-            uncompletedTasksCount={uncompletedTasksCount}
-          />
-        </div>
-
-        {/* ACTIVE MODAL POPUPS */}
-        {activeModal === 'watch' && (
-          <WatchModal
+        {/* DEDICATED WATCH VIDEOS PAGE */}
+        {activeTab === 'watch' && (
+          <WatchPage
             videos={videos}
             onEarnPoints={handleEarnPoints}
             onToggleOffline={handleToggleOffline}
-            onClose={() => setActiveModal(null)}
             seniorMode={effectiveUrdu}
             watchedVideoIds={watchedVideoIds}
             onCompleteVideo={(videoId) => {
               setWatchedVideoIds((prev) => (prev.includes(videoId) ? prev : [...prev, videoId]));
               markMandatoryTaskDone('daily_video');
             }}
+            onBackToHome={() => handleSelectTab('home')}
           />
         )}
 
-        {activeModal === 'learn' && (
-          <LearnModal
+        {/* DEDICATED LEARN EDUCATIONAL PAGE */}
+        {activeTab === 'learn' && (
+          <LearnPage
             quizzes={quizzes}
             onEarnPoints={handleEarnPoints}
-            onClose={() => setActiveModal(null)}
             seniorMode={effectiveUrdu}
             completedQuizIds={completedQuizIds}
             onCompleteQuiz={(quizId) => {
@@ -1922,7 +1839,6 @@ export default function App() {
                 markMandatoryTaskDone('daily_quiz');
               }
             }}
-            streakDays={streakDays}
             onDailyQuizCompleted={() => {
               setQuizStreakFireAnim(true);
               soundService.playStreakFlame();
@@ -1931,8 +1847,57 @@ export default function App() {
               markMandatoryTaskDone('daily_quiz');
               setTimeout(() => setQuizStreakFireAnim(false), 8500);
             }}
+            streakDays={streakDays}
+            onBackToHome={() => handleSelectTab('home')}
           />
         )}
+
+        {/* DEDICATED VERIFIED TASKS PAGE */}
+        {activeTab === 'tasks' && (
+          <TasksPage
+            tasks={tasks}
+            onCompleteTask={handleCompleteTask}
+            onEarnPoints={handleEarnPoints}
+            seniorMode={effectiveUrdu}
+            completedDailyTaskIds={completedDailyTaskIds}
+            onDailyTaskAction={(actionKey) => {
+              if (actionKey === 'checkin') {
+                markMandatoryTaskDone('daily_checkin');
+                handleEarnPoints(50, 'Daily Attendance Check-in 📅');
+              } else if (actionKey === 'learn') {
+                handleSelectTab('learn');
+              } else if (actionKey === 'watch') {
+                handleSelectTab('watch');
+              } else if (actionKey === 'wheel') {
+                setActiveModal('wheel');
+              } else if (actionKey === 'chest') {
+                setActiveModal('chest');
+              }
+            }}
+            streakDays={streakDays}
+            todayPoints={todayPoints}
+            onBackToHome={() => handleSelectTab('home')}
+          />
+        )}
+
+        {/* DEDICATED WALLET & VERIFIED EARNINGS PAGE */}
+        {activeTab === 'wallet' && (
+          <WalletPage
+            points={points}
+            todayPoints={todayPoints}
+            totalJoyPointsEarned={totalJoyPointsEarned}
+            completedTasksCount={completedTasksCount}
+            transactions={transactions}
+            onEarnPoints={handleEarnPoints}
+            onDeductPoints={handleDeductPoints}
+            seniorMode={effectiveUrdu}
+            currentUser={currentUser}
+            onOpenAdminPortal={() => setShowAdminModal(true)}
+            onBackToHome={() => handleSelectTab('home')}
+          />
+        )}
+
+        {/* ACTIVE MODAL OVERLAYS (Non-tab dialogues) */}
 
         {activeModal === 'play' && (
           <MiniGames
@@ -1945,12 +1910,16 @@ export default function App() {
           />
         )}
 
-        {activeModal === 'tasks' && (
-          <TasksModal
-            tasks={tasks}
-            onCompleteTask={handleCompleteTask}
+        {/* JoyLudo Royal Modal */}
+        {activeModal === 'ludo' && (
+          <LudoGame
+            onEarnPoints={(pts, reason) => {
+              setGamesCompletedCount((c) => Math.min(3, c + 1));
+              handleEarnPoints(pts, reason);
+            }}
             onClose={() => setActiveModal(null)}
             seniorMode={effectiveUrdu}
+            onTriggerConfetti={handleTriggerConfetti}
           />
         )}
 
@@ -1959,26 +1928,6 @@ export default function App() {
             referrals={referrals}
             onClose={() => setActiveModal(null)}
             seniorMode={effectiveUrdu}
-          />
-        )}
-
-        {activeModal === 'wallet' && (
-          <WalletModal
-            points={points}
-            todayPoints={todayPoints}
-            transactions={transactions}
-            onRedeemPerk={handleRedeemPerk}
-            onEarnPoints={handleEarnPoints}
-            onDeductPoints={handleDeductPoints}
-            onClose={() => setActiveModal(null)}
-            seniorMode={effectiveUrdu}
-            hasAdFree={hasAdFree}
-            currentUser={currentUser}
-            onOpenAdminPortal={() => setShowAdminModal(true)}
-            onBuyAdFree={() => {
-              setHasAdFree(true);
-              localStorage.setItem('joyearn_has_ad_free', 'true');
-            }}
           />
         )}
 
@@ -2042,11 +1991,20 @@ export default function App() {
             completedActivitiesCount={dailyGoalCount}
             streakDays={streakDays}
             hasAdFree={hasAdFree}
-            onOpenLearn={() => setActiveModal('learn')}
-            onOpenWatch={() => setActiveModal('watch')}
+            onOpenLearn={() => {
+              setActiveModal(null);
+              handleSelectTab('learn');
+            }}
+            onOpenWatch={() => {
+              setActiveModal(null);
+              handleSelectTab('watch');
+            }}
             onOpenSpin={() => setActiveModal('wheel')}
             onOpenScratch={() => setActiveModal('play')}
-            onOpenWallet={() => setActiveModal('wallet')}
+            onOpenWallet={() => {
+              setActiveModal(null);
+              handleSelectTab('wallet');
+            }}
             onTriggerConfetti={handleTriggerConfetti}
             onClaimMilestone={handleClaimMilestone}
             claimedMilestoneIds={claimedMilestones}
@@ -2177,8 +2135,14 @@ export default function App() {
           claimedChestToday={claimedChestToday}
           uncompletedTasksCount={uncompletedTasksCount}
           onOpenChest={() => setActiveModal('chest')}
-          onOpenTasks={() => setActiveModal('tasks')}
-          onOpenLearn={() => setActiveModal('learn')}
+          onOpenTasks={() => {
+            setActiveModal(null);
+            handleSelectTab('tasks');
+          }}
+          onOpenLearn={() => {
+            setActiveModal(null);
+            handleSelectTab('learn');
+          }}
           seniorMode={effectiveUrdu}
           isOpen={activeModal === 'notifications'}
           onClose={() => setActiveModal(null)}
@@ -2250,6 +2214,18 @@ export default function App() {
             </div>
           </div>
         )}
+      </div>
+
+      {/* FIXED ANDROID MATERIAL 3 BOTTOM NAVIGATION BAR (Anchored directly to viewport bottom across all 5 pages) */}
+      <div className="fixed bottom-0 left-0 right-0 z-40 bg-white/95 dark:bg-slate-900/95 backdrop-blur-md border-t border-gray-200/80 dark:border-slate-800 shadow-2xl">
+        <div className="max-w-md mx-auto">
+          <AndroidBottomNav
+            activeTab={activeTab}
+            onSelectTab={(tab) => handleSelectTab(tab as NavTab)}
+            seniorMode={effectiveUrdu}
+            uncompletedTasksCount={uncompletedTasksCount}
+          />
+        </div>
       </div>
 
       {/* Standalone Streak Leaderboard Modal */}

@@ -29,13 +29,14 @@ export const DAILY_TASKS_GOAL_LINE =
  */
 export const MONTHLY_PRIZE_POOL_POINTS = 50000; // e.g., $50.00 USD pool
 
-/**
- * Monthly Prize Pool Distribution Percentages:
- * OWNER_PERCENT = 70 (70% owner operational share)
- * USERS_PERCENT = 30 (30% community reward pool)
- */
-export const OWNER_PERCENT = 70;
-export const USERS_PERCENT = 30;
+export {
+  OWNER_PERCENT,
+  USERS_PERCENT,
+  RESERVE_PERCENT,
+  MAX_POINT_VALUE_USD,
+  PAYOUT_FEE_PERCENT,
+  POOL_CARRY_OVER,
+} from '../config/paymentConfig';
 
 export type MandatoryTaskId =
   | 'daily_checkin'

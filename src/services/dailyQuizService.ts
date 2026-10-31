@@ -127,10 +127,11 @@ export interface ShuffledQuizItem extends QuizItem {
  */
 export function shuffleQuizOptions(quiz: QuizItem, randomSeed?: number): ShuffledQuizItem {
   const indices = [0, 1, 2, 3];
+  const rand = randomSeed !== undefined ? createPRNG(randomSeed) : Math.random;
   
   // Fisher-Yates shuffle
   for (let i = indices.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
+    const j = Math.floor(rand() * (i + 1));
     [indices[i], indices[j]] = [indices[j], indices[i]];
   }
 
@@ -170,8 +171,15 @@ export function isDailyQuizCompletedToday(): boolean {
   }
 }
 
+export interface DailyQuizHistoryRecord {
+  date: string;
+  score: number;
+  totalQuestions: number;
+  completedAt: string;
+}
+
 /**
- * Marks today's daily quiz as completed
+ * Marks today's daily quiz as completed and persists record to history
  */
 export function markDailyQuizCompletedToday(score: number): void {
   if (typeof window === 'undefined') return;
@@ -180,11 +188,54 @@ export function markDailyQuizCompletedToday(score: number): void {
     localStorage.setItem(`joyearn_daily_quiz_completed_${today}`, 'true');
     localStorage.setItem(`joyearn_daily_quiz_score_${today}`, String(score));
     
+    // Save to historical records log
+    const history = getDailyQuizHistory();
+    const existingIndex = history.findIndex((h) => h.date === today);
+    const newRecord: DailyQuizHistoryRecord = {
+      date: today,
+      score,
+      totalQuestions: 5,
+      completedAt: new Date().toISOString()
+    };
+    if (existingIndex >= 0) {
+      history[existingIndex] = newRecord;
+    } else {
+      history.unshift(newRecord);
+    }
+    localStorage.setItem('joyearn_daily_quiz_history_records', JSON.stringify(history.slice(0, 180)));
+
     // Increment total quizzes completed counter
     const currentCount = parseInt(localStorage.getItem('joyearn_completed_quizzes_count') || '0', 10);
     localStorage.setItem('joyearn_completed_quizzes_count', String(currentCount + 1));
   } catch {
     // storage not available
+  }
+}
+
+/**
+ * Returns today's score if completed, or null
+ */
+export function getTodayDailyQuizScore(): number | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    const today = getTodayDateString();
+    const val = localStorage.getItem(`joyearn_daily_quiz_score_${today}`);
+    return val !== null ? parseInt(val, 10) : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Returns full historical daily quiz scores
+ */
+export function getDailyQuizHistory(): DailyQuizHistoryRecord[] {
+  if (typeof window === 'undefined') return [];
+  try {
+    const raw = localStorage.getItem('joyearn_daily_quiz_history_records');
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
   }
 }
 
@@ -204,8 +255,11 @@ export function getDailyQuizForToday(allQuizzes: QuizItem[] = ALL_QUIZZES): Shuf
     selectedQuestions = safeBank.slice(0, 5);
   }
 
-  // Shuffle options for all 5 questions
-  return selectedQuestions.map((q) => shuffleQuizOptions(q));
+  const today = getTodayDateString();
+  const seed = dateToSeed(today);
+
+  // Deterministically shuffle options so they remain stable throughout today
+  return selectedQuestions.map((q, idx) => shuffleQuizOptions(q, seed + idx * 7919));
 }
 
 /**

@@ -74,18 +74,22 @@ export const PrivacyPolicyModal: React.FC<PrivacyPolicyModalProps> = ({ onClose,
             </p>
           </div>
 
-          <div className="p-3 bg-amber-50 border border-amber-200 rounded-2xl space-y-1">
+          <div className="p-3 bg-amber-50 border border-amber-200 rounded-2xl space-y-2">
             <h4 className="font-extrabold text-amber-900 flex items-center gap-1.5">
               <Sparkles className="w-3.5 h-3.5 text-amber-600" />
               4. Rewards & Wallet Policy (JoyPoints)
             </h4>
             <p className="text-amber-900 font-bold">
-              Points can be exchanged for rewards subject to the Wallet terms.
+              Points have no fixed cash value. Rewards are calculated from the real revenue received for each month, are reviewed manually, may be zero in some months and are not guaranteed.
+            </p>
+            <p className="text-slate-700 text-[11px] font-semibold leading-relaxed">
+              70% of net ad revenue is kept by the app owner to run the app. 30% forms the monthly rewards pool (with a 10% safety reserve). Payouts are paid only from the published rewards pool of funds actually received. Any unused pool balance is carried over to the next month. Transfer fees are deducted from the payout amount. Minimum withdrawal is $100.
             </p>
             <p className="text-slate-600 text-[11px] leading-relaxed">
-              JoyPoints are awarded for completing educational quizzes, viewing family-safe learning curriculum, and consistent daily study habits. Rewards depend on ad revenue, are reviewed manually and are not guaranteed. Amounts may be very small. Points may also be used in-app to unlock learning themes, avatars, and badges.
+              JoyPoints are awarded for completing educational quizzes, viewing family-safe learning curriculum, and consistent daily study habits. After each month is published, qualifying shares are credited to your approved balance capped at $0.002 per point. Amounts may be very small. Points may also be used in-app to unlock learning themes, avatars, and badges.
             </p>
           </div>
+
 
           <div className="p-3 bg-slate-50 border border-slate-200 rounded-2xl space-y-1">
             <h4 className="font-extrabold text-slate-800 flex items-center gap-1.5">

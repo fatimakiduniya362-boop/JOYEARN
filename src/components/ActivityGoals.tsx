@@ -34,6 +34,7 @@ export interface ActivityGoalsProps {
   onClaimGoalReward: (points: number) => void;
   seniorMode: boolean;
   currentPoints?: number;
+  celebrateBurst?: boolean;
 }
 
 export const ActivityGoals: React.FC<ActivityGoalsProps> = ({
@@ -51,6 +52,7 @@ export const ActivityGoals: React.FC<ActivityGoalsProps> = ({
   onOpenTasks,
   onClaimGoalReward,
   seniorMode,
+  celebrateBurst = false,
 }) => {
   const [isExpanded, setIsExpanded] = useState(false);
   const todayDateStr = new Date().toISOString().slice(0, 10);
@@ -166,7 +168,24 @@ export const ActivityGoals: React.FC<ActivityGoalsProps> = ({
   ];
 
   return (
-    <div className="w-full bg-white dark:bg-slate-900 border-2 border-amber-300/80 dark:border-amber-500/40 rounded-3xl p-4 shadow-lg transition-all space-y-3 relative overflow-hidden">
+    <div
+      className={`w-full bg-white dark:bg-slate-900 border-2 rounded-3xl p-4 shadow-lg transition-all space-y-3 relative overflow-hidden ${
+        celebrateBurst
+          ? 'border-amber-400 ring-4 ring-amber-400/50 shadow-2xl shadow-amber-500/25 scale-[1.01]'
+          : 'border-amber-300/80 dark:border-amber-500/40'
+      }`}
+    >
+      {/* Festive Confetti Burst Banner when 5th Activity of the day is reached */}
+      {celebrateBurst && (
+        <div className="absolute inset-x-2 -top-1 z-30 flex items-center justify-center pointer-events-none">
+          <div className="bg-gradient-to-r from-amber-400 via-rose-500 to-purple-600 text-white font-black text-[11px] px-3.5 py-1 rounded-full shadow-lg flex items-center gap-1.5 animate-bounce border border-white">
+            <span>🎉</span>
+            <span>5th Activity Complete! Daily Goal Met!</span>
+            <span>🎊</span>
+          </div>
+        </div>
+      )}
+
       {/* Background ambient badge visual */}
       <div className="absolute -right-6 -bottom-6 w-24 h-24 bg-gradient-to-br from-amber-400/10 to-orange-500/10 rounded-full blur-xl pointer-events-none" />
 

@@ -46,9 +46,18 @@ export interface AppUser {
   displayName: string | null;
   email: string | null;
   photoURL: string | null;
+  points?: number;
+  approvedBalanceUSD?: number; // Verified cash balance credited when months are published
+  publishedMonthsCredited?: string[]; // Array of YYYY-MM strings credited once and never twice
+  qualifyingPoints?: number;
+  isExcludedFromPool?: boolean;
   confirmationEmailSent?: boolean;
   confirmationSentAt?: string;
   hasAdFree?: boolean;
+  createdAt?: string;
+  accountCreatedAt?: string;
+  activeDaysThisMonth?: number;
+  activeDates?: string[];
 }
 
 export interface VideoContent {
@@ -63,7 +72,24 @@ export interface VideoContent {
   fileSize: string;
   summary: string;
   videoUrl?: string;
+  mediaUrl?: string; // Direct verified HTML5 stream URL (mp4/webm)
+  fallbackMediaUrl?: string; // High-availability fallback stream URL
+  videoType?: 'native' | 'embed';
   approved?: boolean;
+  videoId?: string;
+  order?: number;
+}
+
+export interface AdminVideo {
+  id: string;
+  title: string;
+  category: string;
+  videoId: string;
+  approved: boolean;
+  createdAt: string;
+  order: number;
+  thumbnail: string;
+  videoUrl: string;
 }
 
 export interface CustomPlaylist {
@@ -154,6 +180,21 @@ export interface InAppProduct {
 
 export type PaymentMethodType = 'Easypaisa' | 'JazzCash' | 'PayPal' | 'Bank transfer' | 'Gift card';
 
+export type WithdrawalStatus =
+  | 'Submitted'
+  | 'Under review'
+  | 'Verified'
+  | 'Paid'
+  | 'Rejected'
+  | 'Pending'
+  | 'Completed';
+
+export interface WithdrawalTimelineStep {
+  status: WithdrawalStatus | string;
+  date: string;
+  note?: string;
+}
+
 export interface WithdrawalRequest {
   id: string;
   userUid?: string;
@@ -166,12 +207,48 @@ export interface WithdrawalRequest {
   paymentMethod?: PaymentMethodType | string;
   accountDetails?: string;
   accountName?: string;
+  bankName?: string;
+  iban?: string;
+  maskedAccount?: string;
   date?: string;
   createdAt: string;
-  status: 'Pending' | 'Paid' | 'Rejected' | 'Completed';
+  status: WithdrawalStatus;
   notes?: string;
   adminNote?: string;
+  paymentReference?: string;
+  paidAmount?: number;
+  feePercent?: number; // Transfer fee percent (e.g. 2%)
+  feeAmount?: number; // Payout fee deducted from user payout (in USD)
+  netAmount?: number; // Amount user receives = cashAmount - feeAmount (in USD)
+  rejectionReason?: string;
   processedAt?: string;
+  statusUpdatedAt?: string;
+  timeline?: WithdrawalTimelineStep[];
+}
+
+export interface MonthlyPoolRecord {
+  month: string; // YYYY-MM
+  fundsReceived: number; // Real funds received reached owner from AdMob or sponsors
+  fundsReceivedMarked: boolean; // Confirmed by admin
+  fundsReceivedAt?: string;
+  isPublished: boolean; // Month published & shares credited to users
+  publishedAt?: string;
+  ownerShare: number; // OWNER_PERCENT (70%) of fundsReceived
+  usersPool: number; // USERS_PERCENT (30%) of fundsReceived
+  reserve: number; // RESERVE_PERCENT (10%) buffer kept from usersPool
+  distributablePool: number; // usersPool - reserve
+  carriedOver: number; // Unpaid pool balance carried over from earlier published months
+  totalAvailablePool: number; // carriedOver + distributablePool
+  totalApprovedToUsers: number; // Total approved dollars credited to qualifying users
+  totalPaid: number; // Sum of paid user requests
+  totalPending: number; // Sum of pending requests
+  remainingPool: number; // totalAvailablePool - totalPaid
+  monthlyCosts: number; // Owner's monthly expenses entered in dashboard
+  profit: number; // ownerShare - monthlyCosts
+  totalQualifyingPoints?: number;
+  creditedUserCount?: number;
+  updatedAt: string;
+  updatedBy?: string;
 }
 
 export interface TransactionRecord {

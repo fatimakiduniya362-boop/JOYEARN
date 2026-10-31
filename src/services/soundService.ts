@@ -147,6 +147,36 @@ class SoundService {
   }
 
   /**
+   * Cheerful ascending 2-tone chime for correct quiz answers
+   */
+  public playCorrect() {
+    this.playSuccess();
+  }
+
+  /**
+   * Low gentle double buzzer for incorrect answers
+   */
+  public playWrong() {
+    if (this.isMuted || this.volume <= 0) return;
+    try {
+      this.initContext();
+      if (!this.ctx) return;
+      const now = this.ctx.currentTime;
+      const osc = this.ctx.createOscillator();
+      const gain = this.ctx.createGain();
+      osc.type = 'sawtooth';
+      osc.frequency.setValueAtTime(220, now);
+      osc.frequency.setValueAtTime(180, now + 0.1);
+      gain.gain.setValueAtTime(0.08 * this.volume, now);
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.25);
+      osc.connect(gain);
+      gain.connect(this.ctx.destination);
+      osc.start(now);
+      osc.stop(now + 0.25);
+    } catch {}
+  }
+
+  /**
    * Unique, playful sound effect that plays exclusively when the user reaches exactly 5/5 activities.
    * Completely distinguishable from standard 2-tone coin sounds (playCoin):
    * Features a bouncy cartoon-like spring glissando + bright marimba arpeggio + triumphant victory harmonic swell.
@@ -363,6 +393,96 @@ class SoundService {
     } catch {
       // Ignore
     }
+  }
+
+  /**
+   * Realistic tactile dice rolling sound effect (rapid tumbling rattle)
+   */
+  public playDiceRoll() {
+    if (this.isMuted || this.volume <= 0) return;
+    try {
+      this.initContext();
+      if (!this.ctx) return;
+      const now = this.ctx.currentTime;
+      // 5 rapid tumbling clicks with varying frequencies
+      const clicks = [0.0, 0.05, 0.1, 0.16, 0.22, 0.28];
+      clicks.forEach((timeOffset, i) => {
+        const osc = this.ctx!.createOscillator();
+        const gain = this.ctx!.createGain();
+        const startTime = now + timeOffset;
+        const freq = 350 + (i % 3) * 120 + Math.random() * 80;
+
+        osc.type = 'triangle';
+        osc.frequency.setValueAtTime(freq, startTime);
+        osc.frequency.exponentialRampToValueAtTime(160, startTime + 0.035);
+
+        const peak = (0.09 + (i === clicks.length - 1 ? 0.04 : 0)) * this.volume;
+        gain.gain.setValueAtTime(peak, startTime);
+        gain.gain.exponentialRampToValueAtTime(0.0001, startTime + 0.04);
+
+        osc.connect(gain);
+        gain.connect(this.ctx!.destination);
+        osc.start(startTime);
+        osc.stop(startTime + 0.045);
+      });
+      this.triggerHaptic([30, 25, 45]);
+    } catch {}
+  }
+
+  /**
+   * Crisp token hop / move tick sound on Ludo board
+   */
+  public playPieceMove() {
+    if (this.isMuted || this.volume <= 0) return;
+    try {
+      this.initContext();
+      if (!this.ctx) return;
+      const now = this.ctx.currentTime;
+      const osc = this.ctx.createOscillator();
+      const gain = this.ctx.createGain();
+
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(520, now);
+      osc.frequency.exponentialRampToValueAtTime(260, now + 0.05);
+
+      gain.gain.setValueAtTime(0.1 * this.volume, now);
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.05);
+
+      osc.connect(gain);
+      gain.connect(this.ctx.destination);
+      osc.start(now);
+      osc.stop(now + 0.055);
+      this.triggerHaptic(25);
+    } catch {}
+  }
+
+  /**
+   * Exciting capture sound when opponent's token is eliminated
+   */
+  public playCapture() {
+    if (this.isMuted || this.volume <= 0) return;
+    try {
+      this.initContext();
+      if (!this.ctx) return;
+      const now = this.ctx.currentTime;
+
+      // Punchy impact followed by descending glissando
+      const osc = this.ctx.createOscillator();
+      const gain = this.ctx.createGain();
+
+      osc.type = 'sawtooth';
+      osc.frequency.setValueAtTime(680, now);
+      osc.frequency.exponentialRampToValueAtTime(140, now + 0.22);
+
+      gain.gain.setValueAtTime(0.14 * this.volume, now);
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.22);
+
+      osc.connect(gain);
+      gain.connect(this.ctx.destination);
+      osc.start(now);
+      osc.stop(now + 0.23);
+      this.triggerHaptic([60, 40, 90]);
+    } catch {}
   }
 
   /**

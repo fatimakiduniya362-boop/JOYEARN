@@ -45,16 +45,24 @@ export const FirstOpenAuthScreen: React.FC<FirstOpenAuthScreenProps> = ({
     const cleanEmail = fallbackEmail.trim() || 'user@device.local';
 
     soundService.playFanfare();
+    let stableUid = localStorage.getItem('joyearn_stable_device_uid');
+    if (!stableUid) {
+      stableUid = 'joy_' + Math.random().toString(36).substring(2, 11);
+      localStorage.setItem('joyearn_stable_device_uid', stableUid);
+    }
+
     const localUser: AppUser = {
-      uid: 'local_' + Date.now(),
+      uid: stableUid,
       displayName: cleanName,
       email: cleanEmail,
       photoURL: null,
       confirmationEmailSent: false
     };
 
-    localStorage.setItem('joyearn_user_name', cleanName);
+    localStorage.setItem('joyearn_userName', cleanName);
+    localStorage.setItem('joyearn_user_email', cleanEmail);
     localStorage.setItem('joyearn_app_user', JSON.stringify(localUser));
+    localStorage.setItem('joyearn_has_completed_onboarding', 'true');
     setBonusAlreadyClaimed(false);
     setBonusPointsToAward(50);
     setSignedInUser(localUser);
@@ -76,6 +84,13 @@ export const FirstOpenAuthScreen: React.FC<FirstOpenAuthScreenProps> = ({
           photoURL: result.user.photoURL,
           confirmationEmailSent: false
         };
+
+        localStorage.setItem('joyearn_stable_device_uid', result.user.uid);
+        localStorage.setItem('joyearn_app_user', JSON.stringify(appUser));
+        localStorage.setItem('joyearn_has_completed_onboarding', 'true');
+        if (result.user.displayName) {
+          localStorage.setItem('joyearn_userName', result.user.displayName.split(' ')[0]);
+        }
 
         // Check and claim +50 welcome bonus strictly once per Google account, stored in Firestore
         const bonusClaimResult = await claimWelcomeBonusInFirestore(
@@ -100,40 +115,14 @@ export const FirstOpenAuthScreen: React.FC<FirstOpenAuthScreenProps> = ({
       }
     } catch (err: any) {
       if (err?.code === 'auth/popup-blocked' || err?.message?.includes('popup-blocked') || err?.isPopupBlocked) {
-        console.warn('Google Sign In popup blocked by browser/iframe policy. Providing seamless Google session fallback for fatimakiduniya362@gmail.com.');
-        const fallbackUser: AppUser = {
-          uid: 'google_user_fatimakiduniya',
-          displayName: 'Fatima',
-          email: 'fatimakiduniya362@gmail.com',
-          photoURL: null,
-          confirmationEmailSent: false
-        };
-
-        try {
-          // Check and claim +50 welcome bonus strictly once per Google account, stored in Firestore
-          const bonusClaimResult = await claimWelcomeBonusInFirestore(
-            fallbackUser.uid,
-            fallbackUser.email,
-            fallbackUser.displayName
-          );
-
-          if (bonusClaimResult.alreadyClaimed) {
-            setBonusAlreadyClaimed(true);
-            setBonusPointsToAward(0);
-          } else {
-            setBonusAlreadyClaimed(false);
-            setBonusPointsToAward(50);
-          }
-        } catch {
-          setBonusAlreadyClaimed(false);
-          setBonusPointsToAward(50);
-        }
-
-        localStorage.setItem('joyearn_user_name', fallbackUser.displayName || 'Fatima');
-        localStorage.setItem('joyearn_app_user', JSON.stringify(fallbackUser));
-        setSignedInUser(fallbackUser);
-        setAuthState('success');
-        soundService.playFanfare();
+        console.warn('Google Sign In popup blocked by browser/iframe policy.');
+        setAuthState('error');
+        setErrorMessage(
+          seniorMode
+            ? 'گوگل پاپ اپ بلاک ہو گیا ہے۔ براہ کرم براؤزر کی اجازت دیں یا نیچے اپنا نام اور ای میل درج کر کے جاری رکھیں۔'
+            : 'Google Sign-In popup was blocked by your browser. Please allow popups or use the form below to enter with your name and email.'
+        );
+        setShowFallbackForm(true);
         return;
       }
 
@@ -195,11 +184,11 @@ export const FirstOpenAuthScreen: React.FC<FirstOpenAuthScreenProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-gradient-to-br from-rose-500 via-pink-600 to-amber-500 p-4 overflow-y-auto">
+    <div className="fixed inset-0 z-50 flex items-start justify-center bg-gradient-to-br from-rose-500 via-pink-600 to-amber-500 p-4 pt-6 pb-20 overflow-y-auto">
       {/* Background ambient lighting */}
       <div className="absolute inset-0 bg-black/20 backdrop-blur-xs pointer-events-none" />
 
-      <div className="w-full max-w-sm bg-white rounded-3xl p-6 shadow-2xl border-4 border-white/80 relative space-y-5 my-auto text-center z-10 animate-fade-in">
+      <div className="w-full max-w-sm bg-white rounded-3xl p-6 shadow-2xl border-4 border-white/80 relative space-y-5 my-0 text-center z-10 animate-fade-in">
         
         {/* State 1 & 2 & 4: Initial / Loading / Error State */}
         {authState !== 'success' ? (

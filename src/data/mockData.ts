@@ -301,7 +301,7 @@ export const INITIAL_TASKS: SponsoredTask[] = [
     estTime: '1 min',
     requirements: 'Answer 3 quick anonymous questions on clean water storage in your home.',
     completed: false,
-    sponsorName: 'Global Health Initiative',
+    sponsorName: 'JoyEarn Learning',
   },
   {
     id: 't3',
@@ -311,7 +311,7 @@ export const INITIAL_TASKS: SponsoredTask[] = [
     estTime: '1.5 min',
     requirements: 'Read the short security guideline and verify your understanding.',
     completed: false,
-    sponsorName: 'Safe Web International',
+    sponsorName: 'JoyEarn Community',
   },
   {
     id: 't4',
@@ -321,7 +321,7 @@ export const INITIAL_TASKS: SponsoredTask[] = [
     estTime: '1 min',
     requirements: 'Pick your favorite family hobby from the list to improve recommendations.',
     completed: false,
-    sponsorName: 'Global Creative Crafts',
+    sponsorName: 'JoyEarn Arts',
   },
 ];
 
@@ -331,24 +331,7 @@ export const INITIAL_TASKS: SponsoredTask[] = [
  */
 export const INITIAL_TRANSACTIONS: TransactionRecord[] = [];
 
-export const INITIAL_REFERRALS: ReferralUser[] = [
-  {
-    id: 'ref-1',
-    name: 'Tariq Mahmood (Verified Activity)',
-    joinDate: '24 Sep 2026',
-    activitiesCompleted: 6,
-    bonusAwarded: true,
-    pointsEarned: 100,
-  },
-  {
-    id: 'ref-2',
-    name: 'Sana Bilal (In Progress)',
-    joinDate: '25 Sep 2026',
-    activitiesCompleted: 2,
-    bonusAwarded: false,
-    pointsEarned: 0,
-  },
-];
+export const INITIAL_REFERRALS: ReferralUser[] = [];
 
 export const IN_APP_PERKS: PerkItem[] = [
   {

@@ -135,7 +135,7 @@ export const DailyTasksCard: React.FC<DailyTasksCardProps> = ({
     : '0.00';
 
   return (
-    <section className="px-4 py-2">
+    <section className="px-4 py-1.5 max-w-lg mx-auto w-full">
       <div className="bg-white dark:bg-slate-900 border-2 border-indigo-300 dark:border-indigo-600/70 rounded-3xl p-4 shadow-xl space-y-3.5 relative overflow-hidden">
         {/* Ambient Top Glow */}
         <div className="absolute -top-8 -right-8 w-28 h-28 bg-gradient-to-br from-indigo-500/15 to-purple-500/15 rounded-full blur-xl pointer-events-none" />

@@ -27,6 +27,7 @@ import { VideoHistory } from './VideoHistory';
 import { playlistService } from '../services/playlistService';
 import { PlaylistBar } from './PlaylistBar';
 import { AddToPlaylistModal } from './AddToPlaylistModal';
+import { DEFAULT_FALLBACK_VIDEO_STREAM } from '../data/watchVideosData';
 
 interface WatchModalProps {
   videos: VideoContent[];
@@ -250,27 +251,22 @@ export const WatchModal: React.FC<WatchModalProps> = ({
     return () => clearTimeout(loadTimeout);
   }, [selectedVideo.id, retryKey]);
 
+  const onEarnPointsRef = useRef(onEarnPoints);
+  onEarnPointsRef.current = onEarnPoints;
+
+  const onCompleteVideoRef = useRef(onCompleteVideo);
+  onCompleteVideoRef.current = onCompleteVideo;
+
+  const successRef = useRef(success);
+  successRef.current = success;
+
   // Video progress timer for verified 10-second learning reward
   useEffect(() => {
     let interval: NodeJS.Timeout | null = null;
     if (isPlaying && !hasError && !isBackgrounded) {
       interval = setInterval(() => {
         setProgress((prev) => {
-          if (prev >= 100) {
-            if (interval) clearInterval(interval);
-            const alreadyClaimed = isVideoRewardClaimedToday(selectedVideo.id);
-            if (!alreadyClaimed) {
-              try {
-                localStorage.setItem(`joyearn_video_claimed_${selectedVideo.id}_${todayDateStr}`, 'true');
-              } catch {}
-              setWatchedRewardClaimedToday((map) => ({ ...map, [selectedVideo.id]: true }));
-              onCompleteVideo?.(selectedVideo.id);
-              onEarnPoints(selectedVideo.points, `Watched: ${selectedVideo.title}`);
-              soundService.playFanfare();
-              success();
-            }
-            return 100;
-          }
+          if (prev >= 100) return 100;
           return prev + 10;
         });
       }, 1000);
@@ -278,7 +274,24 @@ export const WatchModal: React.FC<WatchModalProps> = ({
     return () => {
       if (interval) clearInterval(interval);
     };
-  }, [isPlaying, hasError, isBackgrounded, selectedVideo, watchedRewardClaimedToday, onCompleteVideo, onEarnPoints, success]);
+  }, [isPlaying, hasError, isBackgrounded]);
+
+  // Video completion & reward distribution effect running cleanly in effect phase
+  useEffect(() => {
+    if (progress >= 100) {
+      const alreadyClaimed = isVideoRewardClaimedToday(selectedVideo.id);
+      if (!alreadyClaimed) {
+        try {
+          localStorage.setItem(`joyearn_video_claimed_${selectedVideo.id}_${todayDateStr}`, 'true');
+        } catch {}
+        setWatchedRewardClaimedToday((map) => ({ ...map, [selectedVideo.id]: true }));
+        onCompleteVideoRef.current?.(selectedVideo.id);
+        onEarnPointsRef.current?.(selectedVideo.points, `Watched: ${selectedVideo.title}`);
+        soundService.playFanfare();
+        successRef.current();
+      }
+    }
+  }, [progress, selectedVideo.id, selectedVideo.points, selectedVideo.title, todayDateStr]);
 
   const handleSelectVideo = (video: VideoContent) => {
     selection();
@@ -420,22 +433,42 @@ export const WatchModal: React.FC<WatchModalProps> = ({
           ref={playerBoxRef}
           className="relative bg-slate-950 text-white flex flex-col items-center justify-center min-h-[220px] max-h-[250px] aspect-video w-full overflow-hidden select-none"
         >
-          {/* Official YouTube Embed Iframe with Privacy-Enhanced No-Cookie Domain & rel=0 */}
+          {/* Direct HTML5 Video Player with Verified Educational Streams */}
           {!hasError && (
-            <iframe
-              key={`${currentVideoId}-${retryKey}`}
-              src={`https://www.youtube-nocookie.com/embed/${currentVideoId}?autoplay=1&enablejsapi=1&rel=0&modestbranding=1&playsinline=1`}
-              title={selectedVideo.title}
-              className="w-full h-full border-0 absolute inset-0 z-0"
-              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share; fullscreen"
-              allowFullScreen
-              onLoad={() => setIsLoading(false)}
-              onError={() => {
-                setHasError(true);
+            <video
+              key={`${selectedVideo.id}-${retryKey}`}
+              src={selectedVideo.mediaUrl || selectedVideo.videoUrl || DEFAULT_FALLBACK_VIDEO_STREAM}
+              poster={selectedVideo.thumbnail}
+              controls
+              playsInline
+              autoPlay
+              className="w-full h-full object-cover absolute inset-0 z-0"
+              onLoadedData={() => setIsLoading(false)}
+              onPlay={() => {
+                setIsPlaying(true);
                 setIsLoading(false);
-                warning();
               }}
-            />
+              onPause={() => setIsPlaying(false)}
+              onError={() => {
+                // Auto-fallback
+                const target = document.querySelector('video');
+                if (target && target.src !== DEFAULT_FALLBACK_VIDEO_STREAM) {
+                  target.src = DEFAULT_FALLBACK_VIDEO_STREAM;
+                  target.load();
+                  target.play().catch(() => {});
+                } else {
+                  setHasError(true);
+                  setIsLoading(false);
+                  warning();
+                }
+              }}
+            >
+              <source
+                src={selectedVideo.mediaUrl || selectedVideo.videoUrl || DEFAULT_FALLBACK_VIDEO_STREAM}
+                type="video/webm"
+              />
+              <source src={DEFAULT_FALLBACK_VIDEO_STREAM} type="video/webm" />
+            </video>
           )}
 
           {/* Loading Spinner Overlay */}
