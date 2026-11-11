@@ -44,7 +44,10 @@ export const ShopMarketModal: React.FC<ShopMarketModalProps> = ({
   const handleBuy = (item: typeof catalog[0]) => {
     if (purchasedIds.includes(item.id)) return;
     if (userPoints < item.cost) {
-      alert(`You need ${item.cost} JoyPoints to purchase this item!`);
+      soundService.playWrong();
+      try {
+        alert(`You need ${item.cost} JoyPoints to purchase this item!`);
+      } catch {}
       return;
     }
     soundService.playCoin();

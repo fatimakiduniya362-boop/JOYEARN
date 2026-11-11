@@ -46,22 +46,24 @@ interface WeeklyProgressTrackerProps {
 
 export const WeeklyProgressTracker: React.FC<WeeklyProgressTrackerProps> = ({
   seniorMode = false,
-  todayActivitiesCount = 5,
-  streakDays = 4,
+  todayActivitiesCount = 0,
+  streakDays = 0,
   customWeeklyData
 }) => {
   const [chartView, setChartView] = useState<'combined' | 'bars' | 'rollingAvg'>('combined');
 
-  // Preceding 7 days history before Monday: [180, 195, 210, 175, 220, 205, 190]
-  const priorHistory = [180, 195, 210, 175, 220, 205, 190];
+  // Preceding 7 days history before Monday: strictly 0 for new users
+  const priorHistory = [0, 0, 0, 0, 0, 0, 0];
 
-  const currentDayPoints = todayActivitiesCount * 35 + (todayActivitiesCount >= 5 ? 100 : 25);
+  const currentDayPoints = todayActivitiesCount > 0
+    ? todayActivitiesCount * 35 + (todayActivitiesCount >= 5 ? 100 : 25)
+    : 0;
 
   const rawDays = [
-    { day: 'Mon', urduDay: 'پیر', dateStr: 'Sep 25', activities: 5, points: 190, isToday: false },
-    { day: 'Tue', urduDay: 'منگل', dateStr: 'Sep 26', activities: 6, points: 220, isToday: false },
-    { day: 'Wed', urduDay: 'بدھ', dateStr: 'Sep 27', activities: 5, points: 185, isToday: false },
-    { day: 'Thu', urduDay: 'جمعرات', dateStr: 'Sep 28', activities: 7, points: 260, isToday: false },
+    { day: 'Mon', urduDay: 'پیر', dateStr: 'Mon', activities: streakDays >= 4 ? 3 : 0, points: streakDays >= 4 ? 100 : 0, isToday: false },
+    { day: 'Tue', urduDay: 'منگل', dateStr: 'Tue', activities: streakDays >= 3 ? 3 : 0, points: streakDays >= 3 ? 100 : 0, isToday: false },
+    { day: 'Wed', urduDay: 'بدھ', dateStr: 'Wed', activities: streakDays >= 2 ? 3 : 0, points: streakDays >= 2 ? 100 : 0, isToday: false },
+    { day: 'Thu', urduDay: 'جمعرات', dateStr: 'Thu', activities: streakDays >= 1 ? 3 : 0, points: streakDays >= 1 ? 100 : 0, isToday: false },
     {
       day: 'Fri',
       urduDay: 'جمعہ',
@@ -71,7 +73,7 @@ export const WeeklyProgressTracker: React.FC<WeeklyProgressTrackerProps> = ({
       isToday: true
     },
     { day: 'Sat', urduDay: 'ہفتہ', dateStr: 'Tomorrow', activities: 0, points: 0, isToday: false },
-    { day: 'Sun', urduDay: 'اتوار', dateStr: 'Oct 01', activities: 0, points: 0, isToday: false }
+    { day: 'Sun', urduDay: 'اتوار', dateStr: 'Sun', activities: 0, points: 0, isToday: false }
   ];
 
   // Calculate 7-day rolling average for each day
@@ -108,13 +110,13 @@ export const WeeklyProgressTracker: React.FC<WeeklyProgressTrackerProps> = ({
   const totalWeeklyActivities = data.reduce((acc, curr) => acc + curr.activities, 0);
   const consistencyRate = Math.round((daysHitTarget / 7) * 100);
 
-  // Active average of points earned across logged days
+  // Active average of points earned across logged days (0 if no activity)
   const activeDays = data.filter((d) => d.activities > 0);
   const currentRollingAvg =
     data.find((d) => d.isToday)?.rollingAvgPoints ||
     (activeDays.length > 0
       ? Math.round(activeDays.reduce((a, b) => a + b.pointsEarned, 0) / activeDays.length)
-      : 205);
+      : 0);
 
   // Custom Chart Tooltip
   const CustomTooltip = ({ active, payload }: any) => {

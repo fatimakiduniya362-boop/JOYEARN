@@ -90,21 +90,33 @@ export const ShareStreakModal: React.FC<ShareStreakModalProps> = ({
     soundService.playClick();
     light();
     const url = `https://wa.me/?text=${encodeURIComponent(activeText)}`;
-    window.open(url, '_blank');
+    try {
+      window.open(url, '_blank', 'noopener,noreferrer');
+    } catch {
+      handleCopy();
+    }
   };
 
   const shareViaTelegram = () => {
     soundService.playClick();
     light();
     const url = `https://t.me/share/url?url=${encodeURIComponent('https://joyearn.app')}&text=${encodeURIComponent(activeText)}`;
-    window.open(url, '_blank');
+    try {
+      window.open(url, '_blank', 'noopener,noreferrer');
+    } catch {
+      handleCopy();
+    }
   };
 
   const shareViaTwitter = () => {
     soundService.playClick();
     light();
     const url = `https://twitter.com/intent/tweet?text=${encodeURIComponent(activeText)}`;
-    window.open(url, '_blank');
+    try {
+      window.open(url, '_blank', 'noopener,noreferrer');
+    } catch {
+      handleCopy();
+    }
   };
 
   return (

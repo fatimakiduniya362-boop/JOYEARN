@@ -35,7 +35,9 @@ export const PromotedOffersSection: React.FC<PromotedOffersSectionProps> = ({
 
     // Open external URL in a safe new window/tab
     if (typeof window !== 'undefined') {
-      window.open(offer.url, '_blank', 'noopener,noreferrer');
+      try {
+        window.open(offer.url, '_blank', 'noopener,noreferrer');
+      } catch {}
     }
   };
 

@@ -161,7 +161,9 @@ export const NotificationManager: React.FC<NotificationManagerProps> = ({
   // Request browser permission
   const handleRequestPermission = async () => {
     if (typeof window === 'undefined' || !('Notification' in window)) {
-      alert('Browser notifications are not supported in this browser environment. In-app banner alerts will be used.');
+      try {
+        alert('Browser notifications are not supported in this browser environment. In-app banner alerts will be used.');
+      } catch {}
       return;
     }
 
@@ -455,7 +457,7 @@ export const NotificationManager: React.FC<NotificationManagerProps> = ({
                     onClick={() => {
                       triggerNotification(
                         '🎁 Daily Chest Ready!',
-                        'Your Day 4 reward is waiting. Tap to claim points and flowers!',
+                        'Your daily chest reward is waiting. Tap to claim points and flowers!',
                         'chest'
                       );
                     }}

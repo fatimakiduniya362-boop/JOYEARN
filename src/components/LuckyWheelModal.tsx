@@ -1,8 +1,10 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Sparkles, Trophy, Award, Gift, Clock, AlertCircle, Volume2, VolumeX, CheckCircle2 } from 'lucide-react';
+import { Sparkles, Trophy, Award, Gift, Clock, AlertCircle, Volume2, VolumeX, CheckCircle2, Play } from 'lucide-react';
 import { hapticService } from '../services/haptics';
 import { VirtualCurrencyDisclaimer } from './VirtualCurrencyDisclaimer';
 import { getTodayWheelSectors } from '../utils/dailyRotation';
+import { adMobManager } from '../services/adMobService';
+import { AdMobRewardedModal } from './AdMobRewardedModal';
 
 export interface WheelSegment {
   id: number;
@@ -51,6 +53,20 @@ export const LuckyWheelModal: React.FC<LuckyWheelModalProps> = ({
   const [showCelebration, setShowCelebration] = useState(false);
   const [timeUntilTomorrow, setTimeUntilTomorrow] = useState('');
   const [isMuted, setIsMuted] = useState(false);
+
+  // Extra Spin via Rewarded Video (Max 1 extra spin per day, hidden if ads disabled)
+  const todayDateStr = new Date().toISOString().slice(0, 10);
+  const [hasUsedExtraSpinToday, setHasUsedExtraSpinToday] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem('joyearn_wheel_extra_spin_date') === todayDateStr;
+    } catch {
+      return false;
+    }
+  });
+  const [extraSpinUnlocked, setExtraSpinUnlocked] = useState(false);
+  const [showRewardedModal, setShowRewardedModal] = useState(false);
+
+  const effectiveHasSpun = hasSpunToday && !extraSpinUnlocked;
 
   // Audio synthesize click effect
   const audioCtxRef = useRef<AudioContext | null>(null);
@@ -329,17 +345,34 @@ export const LuckyWheelModal: React.FC<LuckyWheelModalProps> = ({
         )}
 
         {/* Action Button & Status */}
-        {hasSpunToday ? (
-          <div className="bg-slate-100 border border-slate-200 rounded-2xl p-3.5 text-center space-y-2">
+        {effectiveHasSpun ? (
+          <div className="bg-slate-100 border border-slate-200 rounded-2xl p-3.5 text-center space-y-3">
             <div className="flex items-center justify-center gap-1.5 text-slate-700 text-xs font-extrabold">
               <CheckCircle2 className="w-4 h-4 text-emerald-500" />
-              <span>{seniorMode ? 'آج کا اسپن مکمل ہو چکا ہے' : "Today's Spin Completed"}</span>
+              <span>{seniorMode ? 'آج کا بنیادی اسپن مکمل ہو چکا ہے' : "Today's Spin Completed"}</span>
             </div>
             <p className="text-xs text-slate-500">
               {seniorMode
                 ? 'آپ کل دوبارہ مفت چرخہ گھما سکتے ہیں!'
                 : 'Free spin resets every night at 12:00 AM.'}
             </p>
+
+            {/* Extra Spin Rewarded Video (Max 1 extra per day, hidden when ads disabled or already used) */}
+            {adMobManager.getConfig().adsEnabled && !hasUsedExtraSpinToday && (
+              <button
+                type="button"
+                onClick={() => setShowRewardedModal(true)}
+                className="w-full py-2.5 bg-gradient-to-r from-amber-400 to-orange-500 hover:from-amber-500 hover:to-orange-600 text-slate-950 font-black rounded-xl text-xs shadow-md tap-bounce flex items-center justify-center gap-2"
+              >
+                <Sparkles className="w-4 h-4 fill-slate-950" />
+                <span>
+                  {seniorMode
+                    ? 'ویڈیو دیکھیں اور +1 اضافی اسپن حاصل کریں (1 بار روزانہ)'
+                    : 'Watch Video for +1 Extra Spin (1/Day) 🎬'}
+                </span>
+              </button>
+            )}
+
             <div className="inline-flex items-center gap-1.5 bg-white border border-slate-200 px-3 py-1 rounded-full text-xs font-black text-rose-600">
               <Clock className="w-3.5 h-3.5" />
               <span>
@@ -362,13 +395,19 @@ export const LuckyWheelModal: React.FC<LuckyWheelModalProps> = ({
                   ? seniorMode
                     ? 'چرخہ گھوم رہا ہے...'
                     : 'Spinning Wheel...'
+                  : extraSpinUnlocked
+                  ? seniorMode
+                    ? 'اضافی اسپن گھمائیں! 🌟'
+                    : 'SPIN EXTRA WHEEL! 🌟'
                   : seniorMode
                   ? 'ابھی چرخہ گھمائیں (مفت)'
                   : 'SPIN THE WHEEL (FREE)'}
               </span>
             </button>
             <p className="text-[11px] text-gray-500 font-medium">
-              {seniorMode ? '100% مفت • کوئی چارجز نہیں' : '100% Free daily bonus • 0 real money needed'}
+              {extraSpinUnlocked
+                ? 'Bonus spin unlocked • Enjoy your reward!'
+                : seniorMode ? '100% مفت • کوئی چارجز نہیں' : '100% Free daily bonus • 0 real money needed'}
             </p>
           </div>
         )}
@@ -378,6 +417,24 @@ export const LuckyWheelModal: React.FC<LuckyWheelModalProps> = ({
           variant="badge"
           language={seniorMode ? 'ur' : 'en'}
           className="rounded-xl py-2 px-3 bg-slate-950 border border-amber-400/80 shadow-sm"
+        />
+
+        {/* AdMob Rewarded Video Modal for Extra Spin */}
+        <AdMobRewardedModal
+          isOpen={showRewardedModal}
+          onClose={() => setShowRewardedModal(false)}
+          onRewardEarned={() => {
+            try {
+              localStorage.setItem('joyearn_wheel_extra_spin_date', todayDateStr);
+            } catch {}
+            setHasUsedExtraSpinToday(true);
+            setExtraSpinUnlocked(true);
+            setShowCelebration(false);
+            setWinningSegment(null);
+            setShowRewardedModal(false);
+          }}
+          baseRewardPoints={0}
+          seniorMode={seniorMode}
         />
       </div>
     </div>

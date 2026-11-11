@@ -1,4 +1,4 @@
-import { SponsorAd, SponsorEnquiry } from '../types';
+import { SponsorAd, SponsorEnquiry, SponsorRequest } from '../types';
 import { getFirestoreDB } from './firestoreService';
 import { getSponsorPackageByName } from '../data/sponsorPackages';
 import {
@@ -16,6 +16,7 @@ import {
 
 const LOCAL_STORAGE_KEY = 'joyearn_sponsor_ads_cache';
 const LOCAL_STORAGE_TIME_KEY = 'joyearn_sponsor_ads_cache_time';
+const LOCAL_STORAGE_REQUESTS_KEY = 'joyearn_sponsor_requests_cache';
 export const SPONSOR_ADS_CACHE_TTL = 60 * 60 * 1000; // 1-hour TTL
 export const BATCH_IMPRESSIONS_THRESHOLD = 25; // Flush metrics every 25 impressions
 
@@ -26,38 +27,33 @@ const DEFAULT_SPONSOR_ADS: SponsorAd[] = [];
  * Checks if a sponsor ad is currently qualified to run.
  * Rules:
  * 1. Must be marked active (isActive === true)
- * 2. Paid status must be 'yes'
- * 3. Destination link must be https://
+ * 2. Paid status must not be 'no'
+ * 3. Destination link must be http:// or https://
  * 4. Must be within schedule window (startDate <= today <= endDate)
- * 5. Automatically stops once delivered impressions reach package impressions AND minimum days have passed
+ * 5. Automatically stops once delivered impressions reach target reach
  */
 export function isSponsorAdRunning(ad: SponsorAd): boolean {
   if (!ad.isActive) return false;
 
-  // Ad runs only when paid is 'yes'
-  if (ad.paid && ad.paid !== 'yes') return false;
+  // Ad runs unless explicitly marked unpaid
+  if (ad.paid && ad.paid === 'no') return false;
 
   // Safe destination link
-  if (!ad.destinationLink?.startsWith('https://')) return false;
+  const link = ad.destinationLink || ad.targetUrl || '';
+  if (link && !link.startsWith('https://') && !link.startsWith('http://')) return false;
 
   const todayStr = new Date().toISOString().slice(0, 10);
   if (ad.startDate && ad.startDate > todayStr) return false;
   if (ad.endDate && ad.endDate < todayStr) return false;
 
-  // Determine target impressions & minimum days from package
-  const pkg = ad.package ? getSponsorPackageByName(ad.package) : undefined;
-  const targetImpressions = ad.packageImpressions || pkg?.impressions;
-  const minDays = ad.packageMinDays !== undefined ? ad.packageMinDays : (pkg?.minDays || 0);
-
-  // Check elapsed days since start date or creation date
-  const startMs = ad.startDate ? new Date(ad.startDate).getTime() : (ad.createdAt ? new Date(ad.createdAt).getTime() : Date.now());
-  const nowMs = Date.now();
-  const elapsedDays = Math.max(0, Math.floor((nowMs - startMs) / (1000 * 60 * 60 * 24)));
-
+  // Reach limit check: if reach limit is hit, ad stops automatically
   const deliveredImpressions = ad.impressions || 0;
+  const targetReach =
+    ad.targetReach !== undefined && ad.targetReach > 0
+      ? ad.targetReach
+      : ad.packageImpressions || (ad.package ? getSponsorPackageByName(ad.package)?.impressions : 0) || 0;
 
-  // Automatically stops once delivered impressions reach package impressions AND minimum days have passed
-  if (targetImpressions && deliveredImpressions >= targetImpressions && elapsedDays >= minDays) {
+  if (targetReach > 0 && deliveredImpressions >= targetReach) {
     return false;
   }
 
@@ -469,3 +465,145 @@ export async function markSponsorEnquiryContacted(enquiryId: string): Promise<bo
 
   return true;
 }
+
+// ============================================================================
+// 📦 SPONSOR REQUESTS SYSTEM (Buy Package / Contact Owner)
+// ============================================================================
+
+export async function submitSponsorRequest(
+  data: Omit<SponsorRequest, 'id' | 'status' | 'submittedAt'>
+): Promise<{ success: boolean; id: string }> {
+  const newId = 'sp_req_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6);
+  const newRequest: SponsorRequest = {
+    ...data,
+    id: newId,
+    status: 'pending',
+    submittedAt: new Date().toISOString(),
+  };
+
+  // 1. Local update
+  try {
+    const existing = JSON.parse(localStorage.getItem(LOCAL_STORAGE_REQUESTS_KEY) || '[]');
+    localStorage.setItem(LOCAL_STORAGE_REQUESTS_KEY, JSON.stringify([newRequest, ...existing]));
+  } catch {}
+
+  // 2. Firestore update
+  const db = getFirestoreDB();
+  if (db) {
+    try {
+      await setDoc(doc(db, 'sponsor_requests', newId), newRequest);
+    } catch (e) {
+      console.warn('Error saving sponsor request to Firestore:', e);
+    }
+  }
+
+  return { success: true, id: newId };
+}
+
+export async function loadAllSponsorRequestsForAdmin(): Promise<SponsorRequest[]> {
+  const db = getFirestoreDB();
+  if (db) {
+    try {
+      const colRef = collection(db, 'sponsor_requests');
+      const snap = await getDocs(colRef);
+      const list: SponsorRequest[] = [];
+      snap.forEach((d) => {
+        list.push({ ...d.data(), id: d.id } as SponsorRequest);
+      });
+      if (list.length > 0) {
+        list.sort((a, b) => (b.submittedAt || '').localeCompare(a.submittedAt || ''));
+        return list;
+      }
+    } catch (e) {
+      console.warn('Error loading sponsor requests from Firestore:', e);
+    }
+  }
+
+  try {
+    const list = JSON.parse(localStorage.getItem(LOCAL_STORAGE_REQUESTS_KEY) || '[]');
+    return list;
+  } catch {
+    return [];
+  }
+}
+
+export async function approveSponsorRequest(
+  requestId: string,
+  startDate: string,
+  endDate: string,
+  targetReach: number
+): Promise<boolean> {
+  const db = getFirestoreDB();
+  const all = await loadAllSponsorRequestsForAdmin();
+  const req = all.find((r) => r.id === requestId);
+  if (!req) return false;
+
+  const updatedReq: SponsorRequest = {
+    ...req,
+    status: 'approved',
+    startDate,
+    endDate,
+  };
+
+  // Update in local cache
+  try {
+    const updatedAll = all.map((r) => (r.id === requestId ? updatedReq : r));
+    localStorage.setItem(LOCAL_STORAGE_REQUESTS_KEY, JSON.stringify(updatedAll));
+  } catch {}
+
+  // Update in Firestore
+  if (db) {
+    try {
+      await updateDoc(doc(db, 'sponsor_requests', requestId), {
+        status: 'approved',
+        startDate,
+        endDate,
+      });
+    } catch (e) {
+      console.warn('Error updating sponsor request status in Firestore:', e);
+    }
+  }
+
+  // Create active SponsorAd so it automatically goes live for that period
+  await createSponsorAd({
+    title: req.adTitle || req.businessName,
+    sponsorName: req.businessName || req.name,
+    shortText: `${req.businessName} - Official Verified Sponsor`,
+    destinationLink: req.adLink,
+    startDate,
+    endDate,
+    isActive: true,
+    paid: 'yes',
+    amountPaid: req.packagePriceUSD,
+    package: req.packageName,
+    targetReach: targetReach || req.packageReach,
+    imageUrl: 'https://images.unsplash.com/photo-1557804506-669a67965ba0?w=150&auto=format&fit=crop&q=80',
+  });
+
+  return true;
+}
+
+export async function rejectSponsorRequest(requestId: string, reason?: string): Promise<boolean> {
+  const db = getFirestoreDB();
+  const all = await loadAllSponsorRequestsForAdmin();
+  const updatedAll = all.map((r) =>
+    r.id === requestId ? { ...r, status: 'rejected' as const, notes: reason } : r
+  );
+  try {
+    localStorage.setItem(LOCAL_STORAGE_REQUESTS_KEY, JSON.stringify(updatedAll));
+  } catch {}
+
+  if (db) {
+    try {
+      await updateDoc(doc(db, 'sponsor_requests', requestId), {
+        status: 'rejected',
+        notes: reason || '',
+      });
+    } catch (e) {
+      console.warn('Error rejecting sponsor request in Firestore:', e);
+    }
+  }
+
+  return true;
+}
+

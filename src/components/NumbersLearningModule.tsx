@@ -25,15 +25,8 @@ export const NumbersLearningModule: React.FC<NumbersLearningModuleProps> = ({
   const [score, setScore] = useState(0);
 
   const speakText = (text: string) => {
-    soundService.playClick();
     light();
-    if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
-      window.speechSynthesis.cancel();
-      const utterance = new SpeechSynthesisUtterance(text);
-      utterance.rate = 0.9;
-      utterance.lang = 'en-US';
-      window.speechSynthesis.speak(utterance);
-    }
+    soundService.speakPhonics(text);
   };
 
   const handleSelectNumber = (item: NumberItem) => {

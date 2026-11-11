@@ -21,7 +21,6 @@ import { useHaptics } from '../hooks/useHaptics';
 import { soundService } from '../services/soundService';
 import { VideoThumbnail, extractYouTubeId } from './VideoThumbnail';
 import { submitContentReport } from '../services/firestoreService';
-import { RotatingSponsorAdCard } from './SponsorAdCard';
 import { CategoryFilter, DEFAULT_VIDEO_CATEGORIES } from './CategoryFilter';
 import { VideoHistory } from './VideoHistory';
 import { playlistService } from '../services/playlistService';
@@ -670,11 +669,6 @@ export const WatchModal: React.FC<WatchModalProps> = ({
             onClearHistory={handleClearHistory}
           />
 
-          {/* Rotating Sponsor Card in Video List */}
-          <div className="pb-1">
-            <RotatingSponsorAdCard variant="compact" />
-          </div>
-
           {filteredVideos.length === 0 && (
             <div className="p-6 text-center space-y-2 bg-white rounded-2xl border border-rose-100 my-2">
               <span className="text-2xl block">{activePlaylist ? activePlaylist.emoji || '📁' : '🔍'}</span>
@@ -718,11 +712,6 @@ export const WatchModal: React.FC<WatchModalProps> = ({
 
             return (
               <React.Fragment key={video.id}>
-                {idx === 3 && (
-                  <div className="my-1">
-                    <RotatingSponsorAdCard variant="card" />
-                  </div>
-                )}
                 <div
                   onClick={() => handleSelectVideo(video)}
                   className={`p-2.5 rounded-2xl border transition-all cursor-pointer flex items-center gap-3 tap-bounce ${

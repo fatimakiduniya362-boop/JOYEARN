@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { X, ShieldCheck, Sparkles } from 'lucide-react';
-import { ADMOB_CONFIG, adMobManager, ADS_ENABLED } from '../services/adMobService';
+import { X, ShieldCheck, Sparkles, Megaphone } from 'lucide-react';
+import { ADMOB_CONFIG, adMobManager } from '../services/adMobService';
 import { soundService } from '../services/soundService';
 
 interface AdMobInterstitialModalProps {
@@ -16,9 +16,10 @@ export const AdMobInterstitialModal: React.FC<AdMobInterstitialModalProps> = ({
 }) => {
   const [countdown, setCountdown] = useState(5);
   const [canClose, setCanClose] = useState(false);
+  const config = adMobManager.getConfig();
 
   useEffect(() => {
-    if (!isOpen || !ADS_ENABLED) return;
+    if (!isOpen) return;
 
     adMobManager.setIsAdShowing(true);
     setCountdown(5);
@@ -49,15 +50,22 @@ export const AdMobInterstitialModal: React.FC<AdMobInterstitialModalProps> = ({
     onClose();
   };
 
-  if (!isOpen || !ADS_ENABLED) return null;
+  if (!isOpen) return null;
 
   return (
     <div className="fixed inset-0 z-100 flex items-center justify-center bg-black/90 backdrop-blur-md p-4 animate-in fade-in duration-200">
-      <div className="w-full max-w-sm bg-slate-900 border-2 border-slate-700 rounded-3xl p-6 text-white text-center shadow-2xl space-y-5 relative">
+      <div className="w-full max-w-sm bg-slate-900 border-2 border-slate-700 rounded-3xl p-6 text-white text-center shadow-2xl space-y-4 relative">
         {/* Top bar with Ad badge & Close */}
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-1.5 px-2.5 py-1 bg-amber-400 text-slate-950 rounded-full font-black text-[10px] uppercase tracking-wide">
-            <span>Google AdMob Interstitial</span>
+            {config.adsEnabled ? (
+              <span>Google AdMob Interstitial</span>
+            ) : (
+              <span className="flex items-center gap-1">
+                <Megaphone className="w-3 h-3" />
+                Featured Partner Sponsor
+              </span>
+            )}
           </div>
 
           {canClose ? (
@@ -74,14 +82,14 @@ export const AdMobInterstitialModal: React.FC<AdMobInterstitialModalProps> = ({
           )}
         </div>
 
-        {/* Ad Mock Screen / Preview */}
+        {/* Interstitial Milestone Card */}
         <div className="py-6 px-4 bg-slate-800/80 rounded-2xl border border-slate-700/80 space-y-3">
           <div className="w-16 h-16 rounded-2xl bg-gradient-to-tr from-amber-400 to-rose-500 mx-auto flex items-center justify-center text-3xl shadow-lg">
             🌟
           </div>
           <div>
             <h4 className="font-black text-base text-white">
-              {seniorMode ? 'تعلیمی کوئز مکمل!' : 'Educational Milestone Reached!'}
+              {seniorMode ? 'تعلیمی سنگ میل مکمل!' : 'Educational Milestone Reached!'}
             </h4>
             <p className="text-xs text-slate-300 mt-1 leading-relaxed">
               {seniorMode
@@ -91,10 +99,14 @@ export const AdMobInterstitialModal: React.FC<AdMobInterstitialModalProps> = ({
           </div>
         </div>
 
-        {/* Unit ID Disclaimer */}
+        {/* Unit ID / Disclaimer */}
         <div className="text-[10px] text-slate-500 space-y-1">
-          <p className="font-mono truncate">Unit: {ADMOB_CONFIG.INTERSTITIAL_QUIZ_UNIT_ID}</p>
-          <p>Rate limited to at most 1 ad per 2 minutes • Family policy safe</p>
+          {config.adsEnabled ? (
+            <p className="font-mono truncate">Unit: {ADMOB_CONFIG.INTERSTITIAL_UNIT_ID}</p>
+          ) : (
+            <p>Direct Sponsor Placement • Family policy safe</p>
+          )}
+          <p>Rate limited • Family policy compliant</p>
         </div>
 
         {/* Continue Button */}

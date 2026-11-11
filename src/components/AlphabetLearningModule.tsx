@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { Volume2, Sparkles, CheckCircle2, RotateCcw, BookOpen, ArrowRight } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { Volume2, VolumeX, Sparkles, CheckCircle2, RotateCcw, BookOpen, ArrowRight } from 'lucide-react';
 import { ALPHABET_DATA, AlphabetLetter } from '../data/alphabetDatabase';
 import { soundService } from '../services/soundService';
 import { useHaptics } from '../hooks/useHaptics';
@@ -15,6 +15,23 @@ export const AlphabetLearningModule: React.FC<AlphabetLearningModuleProps> = ({
 }) => {
   const { light, success } = useHaptics();
   const [selectedLetter, setSelectedLetter] = useState<AlphabetLetter>(ALPHABET_DATA[0]);
+  const [isMuted, setIsMuted] = useState<boolean>(() => soundService.getMuted());
+
+  // Subscribe to mute state updates
+  useEffect(() => {
+    const unsub = soundService.subscribeMute((muted) => setIsMuted(muted));
+    return unsub;
+  }, []);
+
+  const toggleSound = () => {
+    const next = !isMuted;
+    soundService.setMuted(next);
+    setIsMuted(next);
+    if (!next) {
+      soundService.playSuccess();
+    }
+  };
+
   const [practicedLetters, setPracticedLetters] = useState<Set<string>>(() => {
     try {
       const saved = localStorage.getItem('joyearn_practiced_letters');
@@ -30,25 +47,16 @@ export const AlphabetLearningModule: React.FC<AlphabetLearningModuleProps> = ({
   const [quizAnswered, setQuizAnswered] = useState(false);
   const [quizSelectedOption, setQuizSelectedOption] = useState<string | null>(null);
 
-  // Text to Speech Pronunciation
+  // Text to Speech Pronunciation & Phonics audio
   const speakText = (text: string) => {
-    soundService.playClick();
     light();
-    if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
-      window.speechSynthesis.cancel();
-      const utterance = new SpeechSynthesisUtterance(text);
-      utterance.rate = 0.9;
-      utterance.pitch = 1.0;
-      utterance.lang = 'en-US';
-      window.speechSynthesis.speak(utterance);
-    }
+    soundService.speakPhonics(text);
   };
 
   const handleSelectLetter = (item: AlphabetLetter) => {
-    soundService.playClick();
     light();
     setSelectedLetter(item);
-    speakText(`${item.letter}. ${item.word}.`);
+    speakText(`${item.letter}. ${item.word}. Phonics: ${item.phonics}.`);
 
     setPracticedLetters((prev) => {
       const next = new Set(prev);
@@ -107,19 +115,34 @@ export const AlphabetLearningModule: React.FC<AlphabetLearningModuleProps> = ({
           </div>
         </div>
 
-        <button
-          onClick={() => {
-            soundService.playClick();
-            setQuizMode(!quizMode);
-          }}
-          className={`px-3 py-1.5 rounded-xl text-xs font-black transition-all tap-bounce ${
-            quizMode
-              ? 'bg-rose-500 text-white shadow-xs'
-              : 'bg-rose-50 text-rose-700 hover:bg-rose-100'
-          }`}
-        >
-          {quizMode ? 'Exit Practice' : 'Letter Quiz'}
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={toggleSound}
+            className={`px-3 py-1.5 rounded-xl text-xs font-black flex items-center gap-1.5 transition-all tap-bounce ${
+              isMuted
+                ? 'bg-slate-100 text-slate-500 hover:bg-slate-200'
+                : 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border border-emerald-200 shadow-2xs'
+            }`}
+            title={isMuted ? 'Sound is muted. Tap to turn sound ON' : 'Sound is ON. Tap to mute'}
+          >
+            {isMuted ? <VolumeX className="w-3.5 h-3.5 text-slate-400" /> : <Volume2 className="w-3.5 h-3.5 text-emerald-600 animate-pulse" />}
+            <span>{isMuted ? 'Sound OFF' : 'Sound ON'}</span>
+          </button>
+
+          <button
+            onClick={() => {
+              soundService.playClick();
+              setQuizMode(!quizMode);
+            }}
+            className={`px-3 py-1.5 rounded-xl text-xs font-black transition-all tap-bounce ${
+              quizMode
+                ? 'bg-rose-500 text-white shadow-xs'
+                : 'bg-rose-50 text-rose-700 hover:bg-rose-100'
+            }`}
+          >
+            {quizMode ? 'Exit Practice' : 'Letter Quiz'}
+          </button>
+        </div>
       </div>
 
       {quizMode ? (

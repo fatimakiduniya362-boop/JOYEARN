@@ -177,5 +177,64 @@ service cloud.firestore {
       allow read: if true;
       allow create, update, delete: if isAdmin();
     }
+
+    // Sponsor Requests: Anyone can submit a sponsor lead; only admin can read, update, or delete
+    match /sponsor_requests/{requestId} {
+      allow create: if true;
+      allow read, update, delete: if isAdmin();
+    }
+
+    // Custom Quiz Questions
+    match /custom_quiz_questions/{questionId} {
+      allow read: if true;
+      allow create, update, delete: if isAdmin();
+    }
+
+    // Community Vlogs collection
+    match /vlogs/{vlogId} {
+      // Approved vlogs with < 3 reports are public; creators can read their own submissions; admin can read all
+      allow read: if (resource.data.status == 'approved' && (!('reportCount' in resource.data) || resource.data.reportCount < 3)) ||
+                     (request.auth != null && resource.data.uid == request.auth.uid) ||
+                     isAdmin();
+
+      // Signed-in users can submit a vlog: must start as 'pending', reportCount 0, valid title & description lengths
+      allow create: if request.auth != null &&
+        request.resource.data.uid == request.auth.uid &&
+        request.resource.data.status == 'pending' &&
+        request.resource.data.reportCount == 0 &&
+        request.resource.data.title is string &&
+        request.resource.data.title.size() > 0 &&
+        request.resource.data.title.size() <= 80 &&
+        request.resource.data.description is string &&
+        request.resource.data.description.size() <= 300 &&
+        request.resource.data.videoId is string &&
+        request.resource.data.videoId.size() == 11 &&
+        request.resource.data.category in ['cooking', 'gardening', 'home and family', 'health', 'nature', 'learning', 'travel', 'funny and wholesome', 'other'];
+
+      // Updates: Admin can update any field; users can increment reportCount for reporting
+      allow update: if isAdmin() ||
+        (
+          // Allow reporting a vlog: only reportCount changes
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['reportCount']) &&
+          request.resource.data.reportCount == resource.data.reportCount + 1
+        );
+
+      // Deletions: Admin or the vlog's creator
+      allow delete: if isAdmin() || (request.auth != null && resource.data.uid == request.auth.uid);
+    }
+
+    // Community Vlog Reports collection
+    match /vlog_reports/{reportId} {
+      // Anyone can submit a report
+      allow create: if request.resource.data.vlogId is string &&
+                       request.resource.data.reason in ['inappropriate clothing or content', 'offensive language', 'copyright', 'spam', 'other'];
+      allow read, update, delete: if isAdmin();
+    }
+
+    // Blocked Creators collection
+    match /blocked_creators/{creatorUid} {
+      allow read: if true;
+      allow create, update, delete: if isAdmin();
+    }
   }
 }

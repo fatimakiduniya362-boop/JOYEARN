@@ -28,33 +28,33 @@ export interface StreakHistoryChartProps {
 
 export const StreakHistoryChart: React.FC<StreakHistoryChartProps> = ({
   seniorMode = false,
-  streakDays = 5,
+  streakDays = 0,
   data,
 }) => {
-  // Generate representative weekly activity history based on user streak
+  // Generate representative weekly activity history based on real user streak (0 for new users)
   const weeklyData: DayActivityData[] = data || [
     {
       day: 'Mon',
       urduDay: 'پیر',
-      activities: 5,
-      points: 175,
-      isActive: true,
+      activities: streakDays >= 1 ? 5 : 0,
+      points: streakDays >= 1 ? 175 : 0,
+      isActive: streakDays >= 1,
       dateStr: 'Day 1'
     },
     {
       day: 'Tue',
       urduDay: 'منگل',
-      activities: 5,
-      points: 190,
-      isActive: true,
+      activities: streakDays >= 2 ? 5 : 0,
+      points: streakDays >= 2 ? 190 : 0,
+      isActive: streakDays >= 2,
       dateStr: 'Day 2'
     },
     {
       day: 'Wed',
       urduDay: 'بدھ',
-      activities: 4,
-      points: 140,
-      isActive: true,
+      activities: streakDays >= 3 ? 4 : 0,
+      points: streakDays >= 3 ? 140 : 0,
+      isActive: streakDays >= 3,
       dateStr: 'Day 3'
     },
     {
@@ -68,25 +68,25 @@ export const StreakHistoryChart: React.FC<StreakHistoryChartProps> = ({
     {
       day: 'Fri',
       urduDay: 'جمعہ',
-      activities: 5,
-      points: 210,
-      isActive: true,
+      activities: streakDays >= 4 ? 5 : 0,
+      points: streakDays >= 4 ? 210 : 0,
+      isActive: streakDays >= 4,
       dateStr: 'Day 5'
     },
     {
       day: 'Sat',
       urduDay: 'ہفتہ',
-      activities: 5,
-      points: 185,
-      isActive: true,
+      activities: streakDays >= 5 ? 5 : 0,
+      points: streakDays >= 5 ? 185 : 0,
+      isActive: streakDays >= 5,
       dateStr: 'Day 6'
     },
     {
       day: 'Sun',
       urduDay: 'اتوار',
-      activities: 5,
-      points: 220,
-      isActive: true, // Today
+      activities: streakDays >= 6 ? 5 : 0,
+      points: streakDays >= 6 ? 220 : 0,
+      isActive: streakDays >= 6,
       dateStr: 'Today'
     },
   ];

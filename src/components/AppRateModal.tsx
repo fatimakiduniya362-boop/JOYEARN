@@ -37,7 +37,9 @@ export const AppRateModal: React.FC<AppRateModalProps> = ({
     // In a native Android environment, open Play Store intent
     const playStoreUrl = 'https://play.google.com/store/apps/details?id=com.joyearn.app';
     if (typeof window !== 'undefined') {
-      window.open(playStoreUrl, '_blank', 'noopener,noreferrer');
+      try {
+        window.open(playStoreUrl, '_blank', 'noopener,noreferrer');
+      } catch {}
     }
 
     if (onRateCompleted) {

@@ -145,10 +145,10 @@ export async function saveMonthlyFundsReceived(
   adminEmail?: string
 ): Promise<MonthlyPoolRecord> {
   const cleanFunds = Math.max(0, +fundsReceived.toFixed(2));
-  const ownerShare = +((cleanFunds * OWNER_PERCENT) / 100).toFixed(2);
-  const usersPool = +((cleanFunds * USERS_PERCENT) / 100).toFixed(2);
-  const reserve = +((usersPool * RESERVE_PERCENT) / 100).toFixed(2);
-  const distributablePool = +(usersPool - reserve).toFixed(2);
+  const ownerShare = cleanFunds;
+  const usersPool = cleanFunds;
+  const reserve = 0;
+  const distributablePool = cleanFunds;
 
   const existingPools = await loadAllMonthlyPools();
   const current = existingPools[monthKey] || createDefaultMonthlyPoolRecord(monthKey);
@@ -252,11 +252,10 @@ export function computeMonthlyPoolMetrics(
     if (typeof val === 'number') {
       const def = createDefaultMonthlyPoolRecord(m);
       def.fundsReceived = val;
-      def.fundsReceivedMarked = true;
-      def.ownerShare = +((val * OWNER_PERCENT) / 100).toFixed(2);
-      def.usersPool = +((val * USERS_PERCENT) / 100).toFixed(2);
-      def.reserve = +((def.usersPool * RESERVE_PERCENT) / 100).toFixed(2);
-      def.distributablePool = +(def.usersPool - def.reserve).toFixed(2);
+      def.ownerShare = val;
+      def.usersPool = val;
+      def.reserve = 0;
+      def.distributablePool = val;
       def.profit = def.ownerShare;
       normalizedPools[m] = def;
     } else {
@@ -279,10 +278,10 @@ export function computeMonthlyPoolMetrics(
   for (const m of months) {
     const record = normalizedPools[m] || createDefaultMonthlyPoolRecord(m);
     const fundsReceived = record.fundsReceived || 0;
-    const ownerShare = +((fundsReceived * OWNER_PERCENT) / 100).toFixed(2);
-    const usersPool = +((fundsReceived * USERS_PERCENT) / 100).toFixed(2);
-    const reserve = +((usersPool * RESERVE_PERCENT) / 100).toFixed(2);
-    const distributablePool = +(usersPool - reserve).toFixed(2);
+    const ownerShare = fundsReceived;
+    const usersPool = fundsReceived;
+    const reserve = 0;
+    const distributablePool = fundsReceived;
 
     const carriedOver = POOL_CARRY_OVER ? runningCarriedOver : 0;
     // Only published months contribute distributable funds to the active available pool

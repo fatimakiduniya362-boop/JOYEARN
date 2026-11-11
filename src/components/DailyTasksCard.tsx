@@ -64,7 +64,7 @@ export const DailyTasksCard: React.FC<DailyTasksCardProps> = ({
   // Load qualifying days from Firestore / local mirror
   const [qualifyingDates, setQualifyingDates] = useState<string[]>([]);
   const [qualifyingPoints, setQualifyingPoints] = useState<number>(0);
-  const [totalCommunityPoints, setTotalCommunityPoints] = useState<number>(18500);
+  const [totalCommunityPoints, setTotalCommunityPoints] = useState<number>(0);
 
   const completedCount = completedTaskIds.length;
   const percentage = Math.round((completedCount / 5) * 100);
@@ -273,8 +273,8 @@ export const DailyTasksCard: React.FC<DailyTasksCardProps> = ({
               <Calendar className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
               <span>
                 {seniorMode
-                  ? `ماہانہ کیلنڈر اور پرائز پول (${qualifyingDaysCount}/${MIN_ACTIVE_DAYS} دن) • سٹریک: ${streakDays} دن`
-                  : `Monthly Calendar & Prize Pool (${qualifyingDaysCount}/${MIN_ACTIVE_DAYS} Active Days) • Streak: ${streakDays}d`}
+                  ? `ماہانہ کیلنڈر اور انعامات (${qualifyingDaysCount}/${MIN_ACTIVE_DAYS} دن) • سٹریک: ${streakDays} دن`
+                  : `Monthly Calendar & Rewards (${qualifyingDaysCount}/${MIN_ACTIVE_DAYS} Active Days) • Streak: ${streakDays}d`}
               </span>
             </div>
             {showCalendar ? (
@@ -366,12 +366,12 @@ export const DailyTasksCard: React.FC<DailyTasksCardProps> = ({
                 })}
               </div>
 
-              {/* Monthly Pool Share Calculation Breakdown */}
+              {/* Monthly Rewards Share Calculation Breakdown */}
               <div className="bg-white dark:bg-slate-850 p-3 rounded-xl border border-slate-200 dark:border-slate-700 space-y-1.5 text-xs">
                 <div className="flex items-center justify-between font-black text-slate-800 dark:text-white">
                   <span className="flex items-center gap-1">
                     <PieChart className="w-3.5 h-3.5 text-indigo-600" />
-                    <span>Estimated Monthly Pool Share:</span>
+                    <span>Estimated Monthly Rewards Share:</span>
                   </span>
                   <span className="text-emerald-600 font-extrabold">
                     ~${userPoolShareDollars} USD ({userPoolSharePercent}%)
@@ -388,7 +388,7 @@ export const DailyTasksCard: React.FC<DailyTasksCardProps> = ({
                     <span>{totalCommunityPoints.toLocaleString()} Pts</span>
                   </div>
                   <div className="flex justify-between">
-                    <span>Current Month Prize Pool:</span>
+                    <span>Current Month Rewards Pool:</span>
                     <span className="font-bold text-amber-600">
                       {MONTHLY_PRIZE_POOL_POINTS.toLocaleString()} Pts (${(MONTHLY_PRIZE_POOL_POINTS / 1000).toFixed(2)})
                     </span>
@@ -396,7 +396,7 @@ export const DailyTasksCard: React.FC<DailyTasksCardProps> = ({
                 </div>
 
                 <div className="text-[10px] bg-slate-50 dark:bg-slate-800 p-2 rounded-lg text-slate-500 leading-relaxed font-medium">
-                  <strong>Calculation Formula:</strong> (Your Points from 100% Completed Days ÷ All Users’ Qualifying Points) × Monthly Ad-Funded Pool. Minimum {MIN_ACTIVE_DAYS} active 100% days required.
+                  <strong>Activity Summary:</strong> Complete all daily tasks consistently to build your study streaks and JoyPoints.
                 </div>
               </div>
             </div>

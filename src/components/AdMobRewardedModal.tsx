@@ -23,7 +23,8 @@ export const AdMobRewardedModal: React.FC<AdMobRewardedModalProps> = ({
   const [isCompleted, setIsCompleted] = useState(false);
 
   useEffect(() => {
-    if (!isOpen || !ADS_ENABLED) {
+    const config = adMobManager.getConfig();
+    if (!isOpen || !config.adsEnabled) {
       setIsPlaying(false);
       setIsCompleted(false);
       return;
@@ -61,7 +62,7 @@ export const AdMobRewardedModal: React.FC<AdMobRewardedModalProps> = ({
     onClose();
   };
 
-  if (!isOpen || !ADS_ENABLED) return null;
+  if (!isOpen || !adMobManager.getConfig().adsEnabled) return null;
 
   return (
     <div className="fixed inset-0 z-100 flex items-center justify-center bg-black/90 backdrop-blur-md p-4 animate-in fade-in duration-200">

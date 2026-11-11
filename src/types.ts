@@ -233,8 +233,8 @@ export interface MonthlyPoolRecord {
   fundsReceivedAt?: string;
   isPublished: boolean; // Month published & shares credited to users
   publishedAt?: string;
-  ownerShare: number; // OWNER_PERCENT (70%) of fundsReceived
-  usersPool: number; // USERS_PERCENT (30%) of fundsReceived
+  ownerShare: number;
+  usersPool: number;
   reserve: number; // RESERVE_PERCENT (10%) buffer kept from usersPool
   distributablePool: number; // usersPool - reserve
   carriedOver: number; // Unpaid pool balance carried over from earlier published months
@@ -318,15 +318,20 @@ export interface AppSettings {
 
 export interface SponsorAd {
   id: string;
-  sponsorName: string;
-  imageUrl: string;
+  sponsorName?: string;
+  imageUrl?: string;
+  logoUrl?: string;
   title: string;
-  shortText: string;
-  destinationLink: string; // must be https://
-  startDate: string; // YYYY-MM-DD
-  endDate: string; // YYYY-MM-DD
+  shortText?: string;
+  bodyText?: string;
+  destinationLink?: string; // must be https://
+  targetUrl?: string;
+  ctaText?: string;
+  startDate?: string; // YYYY-MM-DD
+  endDate?: string; // YYYY-MM-DD
   isActive: boolean;
-  package?: string; // Starter, Basic, Standard, Premium, Mega
+  package?: string; // Basic, Standard, Premium
+  targetReach?: number; // e.g. 5000, 20000, 50000
   packageImpressions?: number;
   packageMinDays?: number;
   languageTarget?: 'English' | 'Urdu' | 'both';
@@ -335,6 +340,25 @@ export interface SponsorAd {
   impressions?: number;
   clicks?: number;
   createdAt?: string;
+}
+
+export interface SponsorRequest {
+  id: string;
+  name: string;
+  businessName: string;
+  contact: string; // email or WhatsApp
+  packageId?: string;
+  packageName: string;
+  packagePriceUSD: number;
+  packageDurationDays: number;
+  packageReach: number;
+  adTitle: string;
+  adLink: string;
+  status: 'pending' | 'approved' | 'rejected';
+  submittedAt: string;
+  startDate?: string;
+  endDate?: string;
+  notes?: string;
 }
 
 export interface SponsorEnquiry {

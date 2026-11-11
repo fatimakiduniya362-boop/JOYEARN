@@ -14,14 +14,14 @@ export const MIN_ACTIVE_DAYS = 15;
  * Notice required in Daily Tasks card and Wallet
  */
 export const REWARDS_DISCLAIMER_NOTICE =
-  'Rewards depend on ad revenue, are reviewed manually and are not guaranteed. Amounts may be very small.';
+  'Rewards depend on ad revenue, are reviewed manually and are not guaranteed.';
 
 /**
  * Core text requirement:
- * "Complete all 5 daily tasks to count today's points toward this month's prize pool."
+ * "Complete all 5 daily tasks to count today's points toward this month's rewards."
  */
 export const DAILY_TASKS_GOAL_LINE =
-  "Complete all 5 daily tasks to count today's points toward this month's prize pool.";
+  "Complete all 5 daily tasks to count today's points toward this month's rewards.";
 
 /**
  * Estimated monthly community prize pool in JoyPoints funded by ad revenue

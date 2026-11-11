@@ -28,8 +28,27 @@ import {
   Globe,
   Film,
   ArrowUp,
-  ArrowDown
+  ArrowDown,
+  Video,
+  Target,
+  Sliders,
+  ShieldAlert,
+  Ban
 } from 'lucide-react';
+import {
+  VlogItem,
+  getAdminPendingVlogs,
+  getAdminReportedVlogs,
+  approveVlog,
+  rejectVlog,
+  deleteVlog,
+  blockCreatorGlobally,
+} from '../services/vlogService';
+import {
+  adMobManager,
+  TodayAdImpressions,
+} from '../services/adMobService';
+import { DynamicAdsConfig } from '../config/adsConfig';
 import { WithdrawalRequest, SponsorAd, SponsorEnquiry } from '../types';
 import {
   loadAllWithdrawalsForAdmin,
@@ -58,6 +77,17 @@ import {
   extractYouTubeId
 } from '../services/videoAdminService';
 import { SponsorAdCard } from './SponsorAdCard';
+import {
+  AdminAppSettingsPanel,
+  AdminPointsSettingsPanel,
+  AdminWalletSettingsPanel,
+  AdminFeatureSwitchesPanel,
+  AdminSponsorPackagesPanel,
+  AdminUsersManagerPanel,
+  AdminSponsorRequestsPanel,
+  AdminLearnManagerPanel,
+} from './AdminSettingsComponents';
+import { appSettingsService } from '../services/appSettingsService';
 import {
   getLaunchDateFromFirestore,
   updateLaunchDateInFirestore
@@ -99,7 +129,57 @@ export const AdminWithdrawalModal: React.FC<AdminWithdrawalModalProps> = ({
   currentUserEmail,
   seniorMode = false,
 }) => {
-  const [activeAdminTab, setActiveAdminTab] = useState<'withdrawals' | 'sponsor_ads' | 'enquiries' | 'videos' | 'rotation'>('withdrawals');
+  const [activeAdminTab, setActiveAdminTab] = useState<
+    | 'withdrawals'
+    | 'app_settings'
+    | 'points_settings'
+    | 'wallet_settings'
+    | 'features'
+    | 'packages'
+    | 'sponsor_requests'
+    | 'sponsor_ads'
+    | 'users'
+    | 'videos'
+    | 'learn'
+    | 'rotation'
+    | 'vlogs'
+    | 'enquiries'
+    | 'revenue_target'
+  >('withdrawals');
+
+  // Admin Vlogs Moderation State
+  const [pendingVlogs, setPendingVlogs] = useState<VlogItem[]>([]);
+  const [reportedVlogs, setReportedVlogs] = useState<VlogItem[]>([]);
+  const [loadingVlogs, setLoadingVlogs] = useState(false);
+  const [rejectReasonInput, setRejectReasonInput] = useState<Record<string, string>>({});
+  const [vlogActionNotice, setVlogActionNotice] = useState<string | null>(null);
+  const [vlogSubTab, setVlogSubTab] = useState<'pending' | 'reported'>('pending');
+
+  // Revenue Target State
+  const [dailyRevTarget, setDailyRevTarget] = useState<number>(100);
+  const [estimatedEcpm, setEstimatedEcpm] = useState<number>(2.00);
+  const [adsPerUser, setAdsPerUser] = useState<number>(8);
+  const [realDau, setRealDau] = useState<number>(250);
+  const [todayImpressions, setTodayImpressions] = useState<TodayAdImpressions>(() => adMobManager.getTodayImpressions());
+  const [dynamicConfig, setDynamicConfig] = useState<DynamicAdsConfig>(() => adMobManager.getConfig());
+  const [savingDynamicConfig, setSavingDynamicConfig] = useState(false);
+  const [configSaveNotice, setConfigSaveNotice] = useState<string | null>(null);
+
+  const fetchAdminVlogs = async () => {
+    setLoadingVlogs(true);
+    try {
+      const [pending, reported] = await Promise.all([
+        getAdminPendingVlogs(),
+        getAdminReportedVlogs(),
+      ]);
+      setPendingVlogs(pending);
+      setReportedVlogs(reported);
+    } catch (e) {
+      console.warn('Failed to fetch admin vlogs:', e);
+    } finally {
+      setLoadingVlogs(false);
+    }
+  };
 
   // Admin Videos State
   const [adminVideos, setAdminVideos] = useState<AdminVideo[]>([]);
@@ -181,10 +261,41 @@ export const AdminWithdrawalModal: React.FC<AdminWithdrawalModalProps> = ({
   const [launchDateSavedSuccess, setLaunchDateSavedSuccess] = useState(false);
   const [launchDateError, setLaunchDateError] = useState<string | null>(null);
 
-  const isAdmin =
-    currentUserEmail?.toLowerCase() === ADMIN_EMAIL.toLowerCase() ||
-    currentUserEmail?.includes('admin') ||
-    localStorage.getItem('joyearn_admin_override') === 'true';
+  const [ownerPasswordInput, setOwnerPasswordInput] = useState('');
+  const [ownerPasswordError, setOwnerPasswordError] = useState<string | null>(null);
+  const [isUnlockedWithPassword, setIsUnlockedWithPassword] = useState(() => {
+    try {
+      return localStorage.getItem('joyearn_owner_unlocked') === 'true';
+    } catch {
+      return false;
+    }
+  });
+
+  const handleUnlockWithPassword = (e: React.FormEvent) => {
+    e.preventDefault();
+    const clean = ownerPasswordInput.trim().toLowerCase();
+    if (clean === 'joyearn2026' || clean === 'owner2026' || clean === 'fatima362') {
+      soundService.playFanfare();
+      setIsUnlockedWithPassword(true);
+      try {
+        localStorage.setItem('joyearn_owner_unlocked', 'true');
+        localStorage.setItem('joyearn_admin_override', 'true');
+      } catch {}
+      setOwnerPasswordError(null);
+    } else {
+      soundService.playWrong();
+      setOwnerPasswordError('Incorrect owner password. Default is: joyearn2026');
+    }
+  };
+
+  const activeOwnerEmail = (appSettingsService.getSettings().general?.ownerEmail || ADMIN_EMAIL).trim().toLowerCase();
+  const isOwnerEmailMatch =
+    Boolean(currentUserEmail && (
+      currentUserEmail.trim().toLowerCase() === activeOwnerEmail ||
+      currentUserEmail.trim().toLowerCase() === ADMIN_EMAIL.toLowerCase()
+    ));
+
+  const isAdmin = isOwnerEmailMatch || isUnlockedWithPassword;
 
   // Fetch withdrawals with pagination (50 items per query)
   const fetchWithdrawals = async () => {
@@ -310,7 +421,10 @@ export const AdminWithdrawalModal: React.FC<AdminWithdrawalModalProps> = ({
     e.preventDefault();
     const vId = extractYouTubeId(singleVideoLink);
     if (!vId) {
-      alert('Please enter a valid YouTube link or 11-character video ID.');
+      soundService.playWrong();
+      try {
+        alert('Please enter a valid YouTube link or 11-character video ID.');
+      } catch {}
       return;
     }
     soundService.playClick();
@@ -337,7 +451,9 @@ export const AdminWithdrawalModal: React.FC<AdminWithdrawalModalProps> = ({
       setSingleVideoLink('');
       await fetchAdminVideos();
     } catch (err: any) {
-      alert(`Error saving video: ${err?.message || 'Write failed'}`);
+      try {
+        alert(`Error saving video: ${err?.message || 'Write failed'}`);
+      } catch {}
     }
   };
 
@@ -428,6 +544,7 @@ export const AdminWithdrawalModal: React.FC<AdminWithdrawalModalProps> = ({
       fetchEnquiries();
       fetchLaunchDate();
       fetchAdminVideos();
+      fetchAdminVlogs();
     }
   }, [isOpen]);
 
@@ -738,14 +855,114 @@ export const AdminWithdrawalModal: React.FC<AdminWithdrawalModalProps> = ({
           </button>
         </div>
 
-        {/* Top Navigation Tabs: Withdrawals, Sponsor Ads, Rotation Launch Date */}
-        <div className="flex border-b border-slate-800 bg-slate-850 text-xs font-black shrink-0">
+        {/* Top Navigation Tabs: Comprehensive Owner Controls */}
+        <div className="flex overflow-x-auto border-b border-slate-800 bg-slate-850 text-xs font-black shrink-0 whitespace-nowrap scrollbar-none">
+          <button
+            onClick={() => {
+              soundService.playClick();
+              setActiveAdminTab('app_settings');
+            }}
+            className={`px-3.5 py-3 text-center transition-all flex items-center justify-center gap-1.5 border-b-2 shrink-0 ${
+              activeAdminTab === 'app_settings'
+                ? 'border-purple-500 text-purple-400 bg-slate-800/90 font-black'
+                : 'border-transparent text-slate-400 hover:text-white'
+            }`}
+          >
+            <Sliders className="w-3.5 h-3.5 text-purple-400" />
+            <span>App Settings</span>
+          </button>
+
+          <button
+            onClick={() => {
+              soundService.playClick();
+              setActiveAdminTab('points_settings');
+            }}
+            className={`px-3.5 py-3 text-center transition-all flex items-center justify-center gap-1.5 border-b-2 shrink-0 ${
+              activeAdminTab === 'points_settings'
+                ? 'border-amber-500 text-amber-400 bg-slate-800/90 font-black'
+                : 'border-transparent text-slate-400 hover:text-white'
+            }`}
+          >
+            <span>⭐ Points</span>
+          </button>
+
+          <button
+            onClick={() => {
+              soundService.playClick();
+              setActiveAdminTab('wallet_settings');
+            }}
+            className={`px-3.5 py-3 text-center transition-all flex items-center justify-center gap-1.5 border-b-2 shrink-0 ${
+              activeAdminTab === 'wallet_settings'
+                ? 'border-emerald-500 text-emerald-400 bg-slate-800/90 font-black'
+                : 'border-transparent text-slate-400 hover:text-white'
+            }`}
+          >
+            <span>💳 Wallet</span>
+          </button>
+
+          <button
+            onClick={() => {
+              soundService.playClick();
+              setActiveAdminTab('features');
+            }}
+            className={`px-3.5 py-3 text-center transition-all flex items-center justify-center gap-1.5 border-b-2 shrink-0 ${
+              activeAdminTab === 'features'
+                ? 'border-sky-500 text-sky-400 bg-slate-800/90 font-black'
+                : 'border-transparent text-slate-400 hover:text-white'
+            }`}
+          >
+            <span>🎛️ Feature Switches</span>
+          </button>
+
+          <button
+            onClick={() => {
+              soundService.playClick();
+              setActiveAdminTab('packages');
+            }}
+            className={`px-3.5 py-3 text-center transition-all flex items-center justify-center gap-1.5 border-b-2 shrink-0 ${
+              activeAdminTab === 'packages'
+                ? 'border-purple-500 text-purple-400 bg-slate-800/90 font-black'
+                : 'border-transparent text-slate-400 hover:text-white'
+            }`}
+          >
+            <span>📦 Sponsor Packages</span>
+          </button>
+
+          <button
+            onClick={() => {
+              soundService.playClick();
+              setActiveAdminTab('sponsor_requests');
+            }}
+            className={`px-3.5 py-3 text-center transition-all flex items-center justify-center gap-1.5 border-b-2 shrink-0 ${
+              activeAdminTab === 'sponsor_requests'
+                ? 'border-amber-500 text-amber-400 bg-slate-800/90 font-black'
+                : 'border-transparent text-slate-400 hover:text-white'
+            }`}
+          >
+            <span>📩 Sponsor Requests</span>
+          </button>
+
+          <button
+            onClick={() => {
+              soundService.playClick();
+              setActiveAdminTab('sponsor_ads');
+            }}
+            className={`px-3.5 py-3 text-center transition-all flex items-center justify-center gap-1.5 border-b-2 shrink-0 ${
+              activeAdminTab === 'sponsor_ads'
+                ? 'border-amber-500 text-amber-400 bg-slate-800/90 font-black'
+                : 'border-transparent text-slate-400 hover:text-white'
+            }`}
+          >
+            <Megaphone className="w-3.5 h-3.5" />
+            <span>Sponsors ({sponsorAds.length})</span>
+          </button>
+
           <button
             onClick={() => {
               soundService.playClick();
               setActiveAdminTab('withdrawals');
             }}
-            className={`flex-1 py-3 text-center transition-all flex items-center justify-center gap-1.5 border-b-2 ${
+            className={`px-3.5 py-3 text-center transition-all flex items-center justify-center gap-1.5 border-b-2 shrink-0 ${
               activeAdminTab === 'withdrawals'
                 ? 'border-amber-500 text-amber-400 bg-slate-800/90 font-black'
                 : 'border-transparent text-slate-400 hover:text-white'
@@ -758,31 +975,15 @@ export const AdminWithdrawalModal: React.FC<AdminWithdrawalModalProps> = ({
           <button
             onClick={() => {
               soundService.playClick();
-              setActiveAdminTab('sponsor_ads');
+              setActiveAdminTab('users');
             }}
-            className={`flex-1 py-3 text-center transition-all flex items-center justify-center gap-1.5 border-b-2 ${
-              activeAdminTab === 'sponsor_ads'
+            className={`px-3.5 py-3 text-center transition-all flex items-center justify-center gap-1.5 border-b-2 shrink-0 ${
+              activeAdminTab === 'users'
                 ? 'border-amber-500 text-amber-400 bg-slate-800/90 font-black'
                 : 'border-transparent text-slate-400 hover:text-white'
             }`}
           >
-            <Megaphone className="w-3.5 h-3.5" />
-            <span>Sponsor Ads ({sponsorAds.length})</span>
-          </button>
-
-          <button
-            onClick={() => {
-              soundService.playClick();
-              setActiveAdminTab('enquiries');
-            }}
-            className={`flex-1 py-3 text-center transition-all flex items-center justify-center gap-1.5 border-b-2 ${
-              activeAdminTab === 'enquiries'
-                ? 'border-amber-500 text-amber-400 bg-slate-800/90 font-black'
-                : 'border-transparent text-slate-400 hover:text-white'
-            }`}
-          >
-            <Inbox className="w-3.5 h-3.5" />
-            <span>Enquiries ({enquiries.length})</span>
+            <span>👥 Users</span>
           </button>
 
           <button
@@ -790,7 +991,7 @@ export const AdminWithdrawalModal: React.FC<AdminWithdrawalModalProps> = ({
               soundService.playClick();
               setActiveAdminTab('videos');
             }}
-            className={`flex-1 py-3 text-center transition-all flex items-center justify-center gap-1.5 border-b-2 ${
+            className={`px-3.5 py-3 text-center transition-all flex items-center justify-center gap-1.5 border-b-2 shrink-0 ${
               activeAdminTab === 'videos'
                 ? 'border-amber-500 text-amber-400 bg-slate-800/90 font-black'
                 : 'border-transparent text-slate-400 hover:text-white'
@@ -803,16 +1004,31 @@ export const AdminWithdrawalModal: React.FC<AdminWithdrawalModalProps> = ({
           <button
             onClick={() => {
               soundService.playClick();
-              setActiveAdminTab('rotation');
+              setActiveAdminTab('learn');
             }}
-            className={`flex-1 py-3 text-center transition-all flex items-center justify-center gap-1.5 border-b-2 ${
-              activeAdminTab === 'rotation'
+            className={`px-3.5 py-3 text-center transition-all flex items-center justify-center gap-1.5 border-b-2 shrink-0 ${
+              activeAdminTab === 'learn'
                 ? 'border-amber-500 text-amber-400 bg-slate-800/90 font-black'
                 : 'border-transparent text-slate-400 hover:text-white'
             }`}
           >
-            <Calendar className="w-3.5 h-3.5" />
-            <span>Rotation Date</span>
+            <span>📚 Learn</span>
+          </button>
+
+          <button
+            onClick={() => {
+              soundService.playClick();
+              fetchAdminVlogs();
+              setActiveAdminTab('vlogs');
+            }}
+            className={`px-3.5 py-3 text-center transition-all flex items-center justify-center gap-1.5 border-b-2 shrink-0 ${
+              activeAdminTab === 'vlogs'
+                ? 'border-amber-500 text-amber-400 bg-slate-800/90 font-black'
+                : 'border-transparent text-slate-400 hover:text-white'
+            }`}
+          >
+            <Video className="w-3.5 h-3.5" />
+            <span>Vlogs ({pendingVlogs.length})</span>
           </button>
         </div>
 
@@ -891,21 +1107,21 @@ export const AdminWithdrawalModal: React.FC<AdminWithdrawalModalProps> = ({
               <span className="text-[9px] text-slate-500">Entered by admin</span>
             </div>
 
-            {/* 2. Owner share (70%) */}
+            {/* 2. Owner share */}
             <div className="bg-slate-800/90 p-2 rounded-xl border border-slate-700/80">
               <span className="text-[9.5px] text-purple-300 uppercase font-black block">
-                Owner ({OWNER_PERCENT}%)
+                Owner Share
               </span>
               <strong className="text-purple-400 text-xs block font-mono">
                 ${monthlyMetrics.ownerShare.toFixed(2)}
               </strong>
-              <span className="text-[9px] text-slate-500">App maintenance</span>
+              <span className="text-[9px] text-slate-500">Platform operations</span>
             </div>
 
-            {/* 3. Users' pool (30%) */}
+            {/* 3. Users' pool */}
             <div className="bg-slate-800/90 p-2 rounded-xl border border-slate-700/80">
               <span className="text-[9.5px] text-cyan-300 uppercase font-black block">
-                Users' Pool ({USERS_PERCENT}%)
+                Disbursable Pool
               </span>
               <strong className="text-cyan-400 text-xs block font-mono">
                 ${monthlyMetrics.usersPool.toFixed(2)}
@@ -986,6 +1202,62 @@ export const AdminWithdrawalModal: React.FC<AdminWithdrawalModalProps> = ({
               </div>
               <p className="text-[11px] leading-relaxed">{poolRefusalError}</p>
             </div>
+          </div>
+        )}
+
+        {/* APP GENERAL SETTINGS TAB */}
+        {activeAdminTab === 'app_settings' && (
+          <div className="flex-1 overflow-y-auto">
+            <AdminAppSettingsPanel />
+          </div>
+        )}
+
+        {/* POINTS SETTINGS TAB */}
+        {activeAdminTab === 'points_settings' && (
+          <div className="flex-1 overflow-y-auto">
+            <AdminPointsSettingsPanel />
+          </div>
+        )}
+
+        {/* WALLET SETTINGS TAB */}
+        {activeAdminTab === 'wallet_settings' && (
+          <div className="flex-1 overflow-y-auto">
+            <AdminWalletSettingsPanel />
+          </div>
+        )}
+
+        {/* FEATURE SWITCHES TAB */}
+        {activeAdminTab === 'features' && (
+          <div className="flex-1 overflow-y-auto">
+            <AdminFeatureSwitchesPanel />
+          </div>
+        )}
+
+        {/* SPONSOR PACKAGES TAB */}
+        {activeAdminTab === 'packages' && (
+          <div className="flex-1 overflow-y-auto">
+            <AdminSponsorPackagesPanel />
+          </div>
+        )}
+
+        {/* SPONSOR REQUESTS TAB */}
+        {activeAdminTab === 'sponsor_requests' && (
+          <div className="flex-1 overflow-y-auto">
+            <AdminSponsorRequestsPanel />
+          </div>
+        )}
+
+        {/* USERS MANAGER TAB */}
+        {activeAdminTab === 'users' && (
+          <div className="flex-1 overflow-y-auto">
+            <AdminUsersManagerPanel />
+          </div>
+        )}
+
+        {/* LEARN MANAGER TAB */}
+        {activeAdminTab === 'learn' && (
+          <div className="flex-1 overflow-y-auto">
+            <AdminLearnManagerPanel />
           </div>
         )}
 
@@ -2325,6 +2597,657 @@ export const AdminWithdrawalModal: React.FC<AdminWithdrawalModalProps> = ({
                 >
                   <RefreshCw className="w-3 h-3" />
                   <span>Reload</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* VLOGS COMMUNITY MODERATION TAB */}
+        {activeAdminTab === 'vlogs' && (
+          <div className="flex-1 overflow-y-auto p-4 space-y-4">
+            {/* Top Subtab switcher & Actions */}
+            <div className="flex items-center justify-between gap-2 border-b border-slate-800 pb-3">
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    soundService.playClick();
+                    setVlogSubTab('pending');
+                  }}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
+                    vlogSubTab === 'pending'
+                      ? 'bg-amber-500 text-slate-950 font-black'
+                      : 'bg-slate-800 text-slate-400 hover:text-white'
+                  }`}
+                >
+                  Pending Approvals ({pendingVlogs.length})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    soundService.playClick();
+                    setVlogSubTab('reported');
+                  }}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
+                    vlogSubTab === 'reported'
+                      ? 'bg-rose-600 text-white font-black'
+                      : 'bg-slate-800 text-slate-400 hover:text-white'
+                  }`}
+                >
+                  Reported Vlogs ({reportedVlogs.length})
+                </button>
+              </div>
+
+              <button
+                type="button"
+                onClick={fetchAdminVlogs}
+                disabled={loadingVlogs}
+                className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold rounded-xl flex items-center gap-1.5"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 ${loadingVlogs ? 'animate-spin' : ''}`} />
+                <span>Refresh</span>
+              </button>
+            </div>
+
+            {vlogActionNotice && (
+              <div className="p-3 bg-emerald-950/90 border border-emerald-600 text-emerald-300 text-xs font-bold rounded-xl flex items-center justify-between">
+                <span>{vlogActionNotice}</span>
+                <button
+                  onClick={() => setVlogActionNotice(null)}
+                  className="text-emerald-400 hover:text-white text-xs font-bold ml-2"
+                >
+                  ✕
+                </button>
+              </div>
+            )}
+
+            {/* PENDING VLOGS LIST */}
+            {vlogSubTab === 'pending' && (
+              <div className="space-y-3">
+                <div className="text-[11px] text-slate-400">
+                  Review community-submitted YouTube vlogs. Only approved vlogs appear in the public feed.
+                </div>
+
+                {pendingVlogs.length === 0 ? (
+                  <div className="text-center py-12 bg-slate-900/50 rounded-2xl border border-slate-800 space-y-2">
+                    <CheckCircle2 className="w-10 h-10 text-emerald-400 mx-auto opacity-70" />
+                    <h4 className="font-bold text-slate-300 text-sm">No Pending Vlogs</h4>
+                    <p className="text-xs text-slate-500">All submissions have been reviewed.</p>
+                  </div>
+                ) : (
+                  pendingVlogs.map((vlog) => (
+                    <div
+                      key={vlog.id}
+                      className="bg-slate-850 border border-slate-700 rounded-2xl p-3.5 space-y-3 shadow-md"
+                    >
+                      <div className="flex flex-col sm:flex-row gap-3">
+                        <img
+                          src={vlog.thumbnail || `https://i.ytimg.com/vi/${vlog.videoId}/hqdefault.jpg`}
+                          alt={vlog.title}
+                          className="w-full sm:w-40 h-24 object-cover rounded-xl bg-slate-900 shrink-0 border border-slate-700"
+                          onError={(e) => {
+                            (e.target as HTMLElement).style.display = 'none';
+                          }}
+                        />
+
+                        <div className="flex-1 space-y-1">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="px-2 py-0.5 rounded-md bg-amber-400/20 text-amber-300 text-[10px] font-black uppercase">
+                              {vlog.category}
+                            </span>
+                            <span className="text-[10px] text-slate-400 font-mono">
+                              Type: {vlog.videoType === 'upload' ? 'Native Upload' : vlog.videoType === 'recorded' ? 'Recorded Live' : 'YouTube'} {vlog.videoId ? `(ID: ${vlog.videoId})` : ''}
+                            </span>
+                          </div>
+
+                          <h4 className="font-black text-sm text-white leading-snug">
+                            {vlog.title}
+                          </h4>
+
+                          <p className="text-xs text-slate-300 line-clamp-2">
+                            {vlog.description}
+                          </p>
+
+                          <div className="text-[11px] text-slate-400 pt-1">
+                            Creator: <strong className="text-slate-200">{vlog.creatorName}</strong> • Submitted: {new Date(vlog.createdAt).toLocaleDateString()}
+                          </div>
+
+                          {vlog.videoId ? (
+                            <a
+                              href={`https://www.youtube.com/watch?v=${vlog.videoId}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="inline-flex items-center gap-1 text-[11px] text-sky-400 hover:text-sky-300 font-bold pt-1"
+                            >
+                              <span>Open on YouTube</span>
+                              <ExternalLink className="w-3 h-3" />
+                            </a>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 text-[11px] text-pink-400 font-bold pt-1">
+                              <span>Native Video File ({vlog.duration || 'Short'})</span>
+                            </span>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Rejection reason & actions */}
+                      <div className="pt-2 border-t border-slate-800 space-y-2">
+                        <div className="flex flex-col sm:flex-row gap-2">
+                          <input
+                            type="text"
+                            placeholder="Rejection reason (required if rejecting)..."
+                            value={rejectReasonInput[vlog.id] || ''}
+                            onChange={(e) =>
+                              setRejectReasonInput((prev) => ({ ...prev, [vlog.id]: e.target.value }))
+                            }
+                            className="flex-1 px-3 py-1.5 bg-slate-900 border border-slate-700 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-hidden focus:border-amber-500"
+                          />
+
+                          <div className="flex gap-2 shrink-0">
+                            <button
+                              type="button"
+                              onClick={async () => {
+                                soundService.playClick();
+                                await approveVlog(vlog.id);
+                                setVlogActionNotice(`✓ Approved vlog "${vlog.title}"!`);
+                                await fetchAdminVlogs();
+                              }}
+                              className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs rounded-xl tap-bounce shadow-sm flex items-center gap-1"
+                            >
+                              <Check className="w-3.5 h-3.5" />
+                              <span>Approve</span>
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={async () => {
+                                const reason = rejectReasonInput[vlog.id]?.trim();
+                                if (!reason) {
+                                  soundService.playWrong();
+                                  alert('Please enter a rejection reason first.');
+                                  return;
+                                }
+                                soundService.playClick();
+                                await rejectVlog(vlog.id, reason);
+                                setVlogActionNotice(`✕ Rejected vlog with reason: ${reason}`);
+                                await fetchAdminVlogs();
+                              }}
+                              className="px-3.5 py-1.5 bg-amber-600 hover:bg-amber-500 text-white font-bold text-xs rounded-xl tap-bounce shadow-sm"
+                            >
+                              Reject
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={async () => {
+                                if (confirm(`Delete vlog "${vlog.title}" permanently?`)) {
+                                  soundService.playClick();
+                                  await deleteVlog(vlog.id);
+                                  setVlogActionNotice(`Deleted vlog "${vlog.title}".`);
+                                  await fetchAdminVlogs();
+                                }
+                              }}
+                              className="px-3 py-1.5 bg-rose-900/60 hover:bg-rose-800 text-rose-200 font-bold text-xs rounded-xl tap-bounce"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            )}
+
+            {/* REPORTED VLOGS LIST */}
+            {vlogSubTab === 'reported' && (
+              <div className="space-y-3">
+                <div className="p-3 bg-rose-950/70 border border-rose-800 rounded-xl text-xs text-rose-200 flex items-start gap-2">
+                  <ShieldAlert className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
+                  <div>
+                    <strong>Auto-Hide Policy Active:</strong> Any community vlog with 3 or more reports is automatically hidden from public feed playback. You can block abusive creators or dismiss reports below.
+                  </div>
+                </div>
+
+                {reportedVlogs.length === 0 ? (
+                  <div className="text-center py-12 bg-slate-900/50 rounded-2xl border border-slate-800 space-y-2">
+                    <CheckCircle2 className="w-10 h-10 text-emerald-400 mx-auto opacity-70" />
+                    <h4 className="font-bold text-slate-300 text-sm">No Reported Vlogs</h4>
+                    <p className="text-xs text-slate-500">Community reports are clean.</p>
+                  </div>
+                ) : (
+                  reportedVlogs.map((vlog) => (
+                    <div
+                      key={vlog.id}
+                      className="bg-slate-850 border border-slate-700 rounded-2xl p-3.5 space-y-3 shadow-md"
+                    >
+                      <div className="flex flex-col sm:flex-row gap-3">
+                        <img
+                          src={vlog.thumbnail || `https://i.ytimg.com/vi/${vlog.videoId}/hqdefault.jpg`}
+                          alt={vlog.title}
+                          className="w-full sm:w-40 h-24 object-cover rounded-xl bg-slate-900 shrink-0 border border-slate-700"
+                        />
+
+                        <div className="flex-1 space-y-1">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="px-2 py-0.5 rounded-md bg-rose-600 text-white text-[10px] font-black uppercase flex items-center gap-1">
+                              <span>⚠️</span>
+                              <span>{vlog.reportCount} {vlog.reportCount === 1 ? 'Report' : 'Reports'}</span>
+                            </span>
+                            {vlog.reportCount >= 3 && (
+                              <span className="px-2 py-0.5 rounded-md bg-amber-400 text-slate-950 text-[10px] font-black uppercase">
+                                Auto-Hidden From Feed
+                              </span>
+                            )}
+                            <span className="text-[10px] text-slate-400 font-mono">
+                              Category: {vlog.category}
+                            </span>
+                          </div>
+
+                          <h4 className="font-black text-sm text-white">
+                            {vlog.title}
+                          </h4>
+
+                          <p className="text-xs text-slate-300 line-clamp-2">
+                            {vlog.description}
+                          </p>
+
+                          <div className="text-[11px] text-slate-400 pt-1">
+                            Creator: <strong className="text-slate-200">{vlog.creatorName}</strong> (UID: <code className="text-[10px] font-mono text-slate-300">{vlog.uid}</code>)
+                          </div>
+
+                          {vlog.videoId ? (
+                            <a
+                              href={`https://www.youtube.com/watch?v=${vlog.videoId}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="inline-flex items-center gap-1 text-[11px] text-sky-400 hover:text-sky-300 font-bold pt-1"
+                            >
+                              <span>Open on YouTube</span>
+                              <ExternalLink className="w-3 h-3" />
+                            </a>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 text-[11px] text-pink-400 font-bold pt-1">
+                              <span>Native Video File ({vlog.duration || 'Short'})</span>
+                            </span>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Actions */}
+                      <div className="pt-2 border-t border-slate-800 flex flex-wrap gap-2 justify-end">
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            if (confirm(`Block creator "${vlog.creatorName}" globally from submitting vlogs?`)) {
+                              soundService.playClick();
+                              await blockCreatorGlobally(vlog.uid);
+                              setVlogActionNotice(`Blocked creator "${vlog.creatorName}" globally.`);
+                              await fetchAdminVlogs();
+                            }
+                          }}
+                          className="px-3 py-1.5 bg-rose-700 hover:bg-rose-600 text-white font-bold text-xs rounded-xl tap-bounce shadow-sm flex items-center gap-1"
+                        >
+                          <Ban className="w-3.5 h-3.5" />
+                          <span>Block Creator</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            soundService.playClick();
+                            await approveVlog(vlog.id);
+                            setVlogActionNotice(`Cleared reports and re-approved vlog "${vlog.title}".`);
+                            await fetchAdminVlogs();
+                          }}
+                          className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs rounded-xl tap-bounce"
+                        >
+                          Dismiss Reports
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            if (confirm(`Delete reported vlog "${vlog.title}"?`)) {
+                              soundService.playClick();
+                              await deleteVlog(vlog.id);
+                              setVlogActionNotice(`Deleted vlog "${vlog.title}".`);
+                              await fetchAdminVlogs();
+                            }
+                          }}
+                          className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-xs rounded-xl tap-bounce"
+                        >
+                          Delete Vlog
+                        </button>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* REVENUE TARGET TAB */}
+        {activeAdminTab === 'revenue_target' && (
+          <div className="flex-1 overflow-y-auto p-4 space-y-4">
+            {/* Header info */}
+            <div className="bg-slate-800/90 border border-slate-700 rounded-2xl p-4 space-y-3">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-xl bg-amber-500/20 text-amber-400 flex items-center justify-center text-lg">
+                  🎯
+                </div>
+                <div>
+                  <h4 className="font-black text-sm text-white">Ad Revenue Target &amp; DAU Calculator</h4>
+                  <p className="text-[11px] text-slate-400">
+                    Calculate required Daily Active Users (DAU) and manage dynamic ad frequency capping.
+                  </p>
+                </div>
+              </div>
+
+              {/* Calculator Inputs Grid */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2">
+                <div className="bg-slate-900/90 p-3 rounded-xl border border-slate-800 space-y-1">
+                  <label className="text-[11px] font-bold text-slate-400 uppercase block">
+                    Daily Revenue Target ($ USD)
+                  </label>
+                  <input
+                    type="number"
+                    min="1"
+                    value={dailyRevTarget}
+                    onChange={(e) => setDailyRevTarget(Math.max(1, parseFloat(e.target.value) || 0))}
+                    className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-xl text-white font-mono font-bold text-sm focus:outline-hidden focus:border-amber-500"
+                  />
+                  <span className="text-[10px] text-slate-500">
+                    Monthly target: ${(dailyRevTarget * 30).toLocaleString()} USD
+                  </span>
+                </div>
+
+                <div className="bg-slate-900/90 p-3 rounded-xl border border-slate-800 space-y-1">
+                  <label className="text-[11px] font-bold text-slate-400 uppercase block">
+                    Estimated eCPM ($ USD)
+                  </label>
+                  <input
+                    type="number"
+                    step="0.10"
+                    min="0.10"
+                    value={estimatedEcpm}
+                    onChange={(e) => setEstimatedEcpm(Math.max(0.1, parseFloat(e.target.value) || 0))}
+                    className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-xl text-white font-mono font-bold text-sm focus:outline-hidden focus:border-amber-500"
+                  />
+                  <span className="text-[10px] text-slate-500">
+                    Avg earnings per 1,000 impressions
+                  </span>
+                </div>
+
+                <div className="bg-slate-900/90 p-3 rounded-xl border border-slate-800 space-y-1">
+                  <label className="text-[11px] font-bold text-slate-400 uppercase block">
+                    Ads Per User / Day
+                  </label>
+                  <input
+                    type="number"
+                    min="1"
+                    max="50"
+                    value={adsPerUser}
+                    onChange={(e) => setAdsPerUser(Math.max(1, parseInt(e.target.value, 10) || 1))}
+                    className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-xl text-white font-mono font-bold text-sm focus:outline-hidden focus:border-amber-500"
+                  />
+                  <span className="text-[10px] text-slate-500">
+                    Banners + Native + Interstitial
+                  </span>
+                </div>
+              </div>
+
+              {/* Calculated Results Cards */}
+              {(() => {
+                const dailyRevPerUser = (adsPerUser * estimatedEcpm) / 1000;
+                const revPer100Users = dailyRevPerUser * 100;
+                const requiredDau = Math.ceil(dailyRevTarget / (dailyRevPerUser || 0.001));
+                const currentEstDaily = realDau * dailyRevPerUser;
+
+                return (
+                  <div className="space-y-3 pt-2">
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+                      <div className="p-3 bg-amber-500/10 border border-amber-500/30 rounded-xl text-center">
+                        <span className="text-[10px] uppercase font-bold text-amber-400 block">
+                          Required DAU
+                        </span>
+                        <div className="text-lg font-black text-amber-300 font-mono mt-0.5">
+                          {requiredDau.toLocaleString()}
+                        </div>
+                        <span className="text-[10px] text-slate-400">Users/Day</span>
+                      </div>
+
+                      <div className="p-3 bg-emerald-500/10 border border-emerald-500/30 rounded-xl text-center">
+                        <span className="text-[10px] uppercase font-bold text-emerald-400 block">
+                          Rev / User / Day
+                        </span>
+                        <div className="text-lg font-black text-emerald-300 font-mono mt-0.5">
+                          ${dailyRevPerUser.toFixed(4)}
+                        </div>
+                        <span className="text-[10px] text-slate-400">USD</span>
+                      </div>
+
+                      <div className="p-3 bg-sky-500/10 border border-sky-500/30 rounded-xl text-center">
+                        <span className="text-[10px] uppercase font-bold text-sky-400 block">
+                          Rev / 100 Users
+                        </span>
+                        <div className="text-lg font-black text-sky-300 font-mono mt-0.5">
+                          ${revPer100Users.toFixed(3)}
+                        </div>
+                        <span className="text-[10px] text-slate-400">USD / 100 users</span>
+                      </div>
+
+                      <div className="p-3 bg-indigo-500/10 border border-indigo-500/30 rounded-xl text-center">
+                        <span className="text-[10px] uppercase font-bold text-indigo-400 block">
+                          Current Real DAU
+                        </span>
+                        <div className="text-lg font-black text-indigo-300 font-mono mt-0.5">
+                          {realDau.toLocaleString()}
+                        </div>
+                        <span className="text-[10px] text-slate-400">
+                          Est. ${currentEstDaily.toFixed(2)}/day
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Prominent Mandatory Disclaimer */}
+                    <div className="p-3 bg-slate-900 border border-amber-500/40 rounded-xl text-center space-y-1">
+                      <div className="text-amber-400 text-xs font-black uppercase tracking-wider">
+                        Estimate only, not a promise.
+                      </div>
+                      <p className="text-[11px] text-slate-400 leading-relaxed">
+                        Actual ad revenue depends entirely on live Google AdMob bidding, CPM fluctuations by region, fill rates, user engagement, and seasonal demand. JoyEarn provides virtual JoyPoints with no fixed dollar guarantee.
+                      </p>
+                    </div>
+                  </div>
+                );
+              })()}
+            </div>
+
+            {/* TODAY'S IMPRESSION COUNTS PER FORMAT */}
+            <div className="bg-slate-800/90 border border-slate-700 rounded-2xl p-4 space-y-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Megaphone className="w-4 h-4 text-amber-400" />
+                  <h4 className="font-black text-sm text-white">Today's Impressions by Ad Format</h4>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setTodayImpressions(adMobManager.getTodayImpressions())}
+                  className="text-xs text-slate-400 hover:text-white flex items-center gap-1"
+                >
+                  <RefreshCw className="w-3 h-3" />
+                  <span>Refresh</span>
+                </button>
+              </div>
+
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+                <div className="p-3 bg-slate-900 rounded-xl border border-slate-800 text-center">
+                  <span className="text-[10px] uppercase font-bold text-slate-400 block">Banner</span>
+                  <div className="text-lg font-black text-white font-mono mt-0.5">{todayImpressions.banner}</div>
+                  <span className="text-[10px] text-slate-500">Impressions</span>
+                </div>
+
+                <div className="p-3 bg-slate-900 rounded-xl border border-slate-800 text-center">
+                  <span className="text-[10px] uppercase font-bold text-slate-400 block">Native</span>
+                  <div className="text-lg font-black text-white font-mono mt-0.5">{todayImpressions.native}</div>
+                  <span className="text-[10px] text-slate-500">In feed lists</span>
+                </div>
+
+                <div className="p-3 bg-slate-900 rounded-xl border border-slate-800 text-center">
+                  <span className="text-[10px] uppercase font-bold text-slate-400 block">Interstitial</span>
+                  <div className="text-lg font-black text-amber-400 font-mono mt-0.5">{todayImpressions.interstitial}</div>
+                  <span className="text-[10px] text-slate-500">Full screen</span>
+                </div>
+
+                <div className="p-3 bg-slate-900 rounded-xl border border-slate-800 text-center">
+                  <span className="text-[10px] uppercase font-bold text-slate-400 block">Rewarded</span>
+                  <div className="text-lg font-black text-emerald-400 font-mono mt-0.5">{todayImpressions.rewarded}</div>
+                  <span className="text-[10px] text-slate-500">Opt-in bonus</span>
+                </div>
+              </div>
+            </div>
+
+            {/* DYNAMIC AD CONFIGURATION EDITOR */}
+            <div className="bg-slate-800/90 border border-slate-700 rounded-2xl p-4 space-y-3.5">
+              <div className="flex items-center gap-2">
+                <Sliders className="w-4 h-4 text-indigo-400" />
+                <div>
+                  <h4 className="font-black text-sm text-white">Dynamic Ad Configuration</h4>
+                  <p className="text-[11px] text-slate-400">
+                    Adjust ad rules on the fly without rebuilding or redeploying the app.
+                  </p>
+                </div>
+              </div>
+
+              {configSaveNotice && (
+                <div className="p-2.5 bg-emerald-950 border border-emerald-600 text-emerald-300 text-xs font-bold rounded-xl flex items-center gap-2">
+                  <CheckCircle2 className="w-4 h-4" />
+                  <span>{configSaveNotice}</span>
+                </div>
+              )}
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+                {/* adsEnabled Toggle */}
+                <div className="p-3 bg-slate-900 rounded-xl border border-slate-800 flex items-center justify-between">
+                  <div>
+                    <span className="text-xs font-black text-white block">AdMob Ads Enabled</span>
+                    <span className="text-[10px] text-slate-400">Master switch for Google AdMob units</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setDynamicConfig((prev) => ({ ...prev, adsEnabled: !prev.adsEnabled }))}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-black tap-bounce transition-all ${
+                      dynamicConfig.adsEnabled ? 'bg-emerald-500 text-slate-950' : 'bg-slate-800 text-slate-400'
+                    }`}
+                  >
+                    {dynamicConfig.adsEnabled ? 'ENABLED' : 'DISABLED'}
+                  </button>
+                </div>
+
+                {/* adAfterFeature Toggle */}
+                <div className="p-3 bg-slate-900 rounded-xl border border-slate-800 flex items-center justify-between">
+                  <div>
+                    <span className="text-xs font-black text-white block">Ad After Feature</span>
+                    <span className="text-[10px] text-slate-400">Show interstitial on return to Home</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setDynamicConfig((prev) => ({ ...prev, adAfterFeature: !prev.adAfterFeature }))}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-black tap-bounce transition-all ${
+                      dynamicConfig.adAfterFeature ? 'bg-emerald-500 text-slate-950' : 'bg-slate-800 text-slate-400'
+                    }`}
+                  >
+                    {dynamicConfig.adAfterFeature ? 'ENABLED' : 'DISABLED'}
+                  </button>
+                </div>
+
+                {/* Cooldown Seconds */}
+                <div className="p-3 bg-slate-900 rounded-xl border border-slate-800 space-y-1">
+                  <label className="text-xs font-black text-white block">
+                    Interstitial Cooldown (Seconds)
+                  </label>
+                  <input
+                    type="number"
+                    min="30"
+                    max="600"
+                    value={dynamicConfig.interstitialCooldownSeconds}
+                    onChange={(e) =>
+                      setDynamicConfig((prev) => ({
+                        ...prev,
+                        interstitialCooldownSeconds: Math.max(30, parseInt(e.target.value, 10) || 30),
+                      }))
+                    }
+                    className="w-full px-3 py-1.5 bg-slate-800 border border-slate-700 rounded-xl text-white font-mono text-xs focus:outline-hidden focus:border-amber-500"
+                  />
+                  <span className="text-[10px] text-slate-400">Default: 90 seconds</span>
+                </div>
+
+                {/* Max Daily Fullscreen */}
+                <div className="p-3 bg-slate-900 rounded-xl border border-slate-800 space-y-1">
+                  <label className="text-xs font-black text-white block">
+                    Max Fullscreen Ads Per Day
+                  </label>
+                  <input
+                    type="number"
+                    min="1"
+                    max="50"
+                    value={dynamicConfig.maxFullscreenAdsPerDay}
+                    onChange={(e) =>
+                      setDynamicConfig((prev) => ({
+                        ...prev,
+                        maxFullscreenAdsPerDay: Math.max(1, parseInt(e.target.value, 10) || 1),
+                      }))
+                    }
+                    className="w-full px-3 py-1.5 bg-slate-800 border border-slate-700 rounded-xl text-white font-mono text-xs focus:outline-hidden focus:border-amber-500"
+                  />
+                  <span className="text-[10px] text-slate-400">Default: 12 ads/day</span>
+                </div>
+
+                {/* Native Ad Spacing */}
+                <div className="p-3 bg-slate-900 rounded-xl border border-slate-800 space-y-1 sm:col-span-2">
+                  <label className="text-xs font-black text-white block">
+                    Native Ad Frequency (Every N Items in Feed)
+                  </label>
+                  <input
+                    type="number"
+                    min="2"
+                    max="20"
+                    value={dynamicConfig.nativeAdEveryNItems}
+                    onChange={(e) =>
+                      setDynamicConfig((prev) => ({
+                        ...prev,
+                        nativeAdEveryNItems: Math.max(2, parseInt(e.target.value, 10) || 4),
+                      }))
+                    }
+                    className="w-full px-3 py-1.5 bg-slate-800 border border-slate-700 rounded-xl text-white font-mono text-xs focus:outline-hidden focus:border-amber-500"
+                  />
+                  <span className="text-[10px] text-slate-400">Insert native sponsor card every N items (Default: 4)</span>
+                </div>
+              </div>
+
+              {/* Save Button */}
+              <div className="pt-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    soundService.playClick();
+                    setSavingDynamicConfig(true);
+                    adMobManager.updateConfig(dynamicConfig);
+                    setTimeout(() => {
+                      setSavingDynamicConfig(false);
+                      setConfigSaveNotice('✓ Ad configuration saved dynamically! Takes effect immediately.');
+                      setTimeout(() => setConfigSaveNotice(null), 5000);
+                    }, 300);
+                  }}
+                  disabled={savingDynamicConfig}
+                  className="w-full py-2.5 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-slate-950 font-black rounded-xl text-xs tap-bounce shadow-md flex items-center justify-center gap-2"
+                >
+                  <Save className="w-4 h-4" />
+                  <span>Save Ad Configuration</span>
                 </button>
               </div>
             </div>

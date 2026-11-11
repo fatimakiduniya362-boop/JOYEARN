@@ -83,7 +83,7 @@ export const PrivacyPolicyModal: React.FC<PrivacyPolicyModalProps> = ({ onClose,
               Points have no fixed cash value. Rewards are calculated from the real revenue received for each month, are reviewed manually, may be zero in some months and are not guaranteed.
             </p>
             <p className="text-slate-700 text-[11px] font-semibold leading-relaxed">
-              70% of net ad revenue is kept by the app owner to run the app. 30% forms the monthly rewards pool (with a 10% safety reserve). Payouts are paid only from the published rewards pool of funds actually received. Any unused pool balance is carried over to the next month. Transfer fees are deducted from the payout amount. Minimum withdrawal is $100.
+              Points have no fixed cash value. Minimum withdrawal thresholds and supported payment methods are managed in wallet settings.
             </p>
             <p className="text-slate-600 text-[11px] leading-relaxed">
               JoyPoints are awarded for completing educational quizzes, viewing family-safe learning curriculum, and consistent daily study habits. After each month is published, qualifying shares are credited to your approved balance capped at $0.002 per point. Amounts may be very small. Points may also be used in-app to unlock learning themes, avatars, and badges.
@@ -112,6 +112,16 @@ export const PrivacyPolicyModal: React.FC<PrivacyPolicyModalProps> = ({ onClose,
               <strong className="text-blue-600">https://ais-pre-yu4imjtkrbbrtd3hcg63dd-498458785197.asia-east1.run.app/delete-account</strong>
               <br />
               or by emailing: <strong className="text-rose-600">support@joyearn.app</strong>
+            </p>
+          </div>
+
+          <div className="p-3 bg-slate-50 border border-slate-200 rounded-2xl space-y-1">
+            <h4 className="font-extrabold text-slate-800 flex items-center gap-1.5">
+              <ShieldCheck className="w-3.5 h-3.5 text-emerald-500" />
+              7. Community Vlogs &amp; User-Shared Media Policy
+            </h4>
+            <p>
+              Signed-in users may share family-friendly YouTube vlog links. By submitting a vlog, you certify that you own the video or have permission to share it, that it is suitable for all ages, and complies with our Community Guidelines. Submissions are limited to 2 per day and 5 pending reviews at once. Every submission is held in review and only approved vlogs appear in public feeds. Any vlog receiving 3 or more community reports is automatically hidden. Sharing or watching vlogs provides zero points, coins, or financial rewards.
             </p>
           </div>
         </div>

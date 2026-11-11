@@ -21,10 +21,11 @@ import { soundService } from '../services/soundService';
 import { useHaptics } from '../hooks/useHaptics';
 import { getTodayDailyQuiz } from '../utils/dailyRotation';
 import { isDailyQuizCompletedToday, markDailyQuizCompletedToday } from '../services/dailyQuizService';
-import { RotatingSponsorAdCard } from './SponsorAdCard';
 import { AlphabetLearningModule } from './AlphabetLearningModule';
 import { NumbersLearningModule } from './NumbersLearningModule';
 import { BioscienceExplorer } from './BioscienceExplorer';
+import { adMobManager } from '../services/adMobService';
+import { AdMobRewardedModal } from './AdMobRewardedModal';
 
 interface LearnPageProps {
   quizzes: QuizItem[];
@@ -71,6 +72,23 @@ export const LearnPage: React.FC<LearnPageProps> = ({
   const [dailyCompleted, setDailyCompleted] = useState(() => isDailyQuizCompletedToday());
   const [dailyOptionSelected, setDailyOptionSelected] = useState<number | null>(null);
   const [dailyAnswered, setDailyAnswered] = useState(false);
+
+  // Daily hints and rewarded state
+  const todayDateStr = new Date().toISOString().slice(0, 10);
+  const [hintCountToday, setHintCountToday] = useState<number>(() => {
+    try {
+      const saved = localStorage.getItem('joyearn_quiz_hints_today');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed.date === todayDateStr) return parsed.count;
+      }
+    } catch {}
+    return 0;
+  });
+  const [eliminatedOptionIndex, setEliminatedOptionIndex] = useState<number | null>(null);
+  const [showHintRewarded, setShowHintRewarded] = useState(false);
+  const [showRewardedDouble, setShowRewardedDouble] = useState(false);
+  const [hasDoubledDailyPoints, setHasDoubledDailyPoints] = useState(false);
 
   // Categories extracted from quizzes
   const categories = useMemo(() => {
@@ -198,6 +216,7 @@ export const LearnPage: React.FC<LearnPageProps> = ({
 
   const handleNextDailyQuestion = () => {
     soundService.playClick();
+    setEliminatedOptionIndex(null);
     if (dailyIndex < todayQuizzes.length - 1) {
       setDailyIndex((i) => i + 1);
       setDailyOptionSelected(null);
@@ -343,6 +362,18 @@ export const LearnPage: React.FC<LearnPageProps> = ({
                 You answered <strong className="text-emerald-600 font-black">{dailyScore}/{todayQuizzes.length}</strong> questions correctly. Your daily streak has been updated!
               </p>
 
+              {/* Rewarded Video Double Points Button (AdMob) */}
+              {adMobManager.getConfig().adsEnabled && !hasDoubledDailyPoints && (
+                <button
+                  type="button"
+                  onClick={() => setShowRewardedDouble(true)}
+                  className="w-full py-3 bg-gradient-to-r from-amber-400 to-orange-500 hover:from-amber-500 hover:to-orange-600 text-slate-950 rounded-2xl font-black text-xs tap-bounce shadow-md flex items-center justify-center gap-2"
+                >
+                  <Sparkles className="w-4 h-4 fill-slate-950" />
+                  <span>{seniorMode ? 'ویڈیو دیکھیں اور پوائنٹس ڈبل کریں (2x)' : 'Watch Video to Double Points (2x) 🪙'}</span>
+                </button>
+              )}
+
               <button
                 onClick={handleBackToLearn}
                 className="w-full py-3.5 bg-emerald-600 text-white rounded-2xl font-black text-xs tap-bounce shadow-md"
@@ -363,19 +394,38 @@ export const LearnPage: React.FC<LearnPageProps> = ({
                   </span>
                 </div>
 
-                <h3 className="text-base font-extrabold text-slate-900 leading-snug">
-                  {seniorMode && todayQuizzes[dailyIndex].urduQuestion
-                    ? todayQuizzes[dailyIndex].urduQuestion
-                    : todayQuizzes[dailyIndex].question}
-                </h3>
+                <div className="flex items-start justify-between gap-2">
+                  <h3 className="text-base font-extrabold text-slate-900 leading-snug">
+                    {seniorMode && todayQuizzes[dailyIndex].urduQuestion
+                      ? todayQuizzes[dailyIndex].urduQuestion
+                      : todayQuizzes[dailyIndex].question}
+                  </h3>
+                </div>
+
+                {/* Rewarded Video Hint Button (Max 2/day, hidden if ads disabled) */}
+                {adMobManager.getConfig().adsEnabled && hintCountToday < 2 && !dailyAnswered && (
+                  <div className="flex justify-end">
+                    <button
+                      type="button"
+                      onClick={() => setShowHintRewarded(true)}
+                      className="inline-flex items-center gap-1 px-2.5 py-1 bg-amber-100 text-amber-900 border border-amber-300 rounded-full text-[10.5px] font-bold tap-bounce hover:bg-amber-200"
+                    >
+                      <Sparkles className="w-3 h-3 text-amber-600" />
+                      <span>{seniorMode ? `اشارہ حاصل کریں (${2 - hintCountToday} باقی)` : `Watch Video for Hint (${2 - hintCountToday} left) 💡`}</span>
+                    </button>
+                  </div>
+                )}
 
                 <div className="space-y-2.5 pt-2">
                   {todayQuizzes[dailyIndex].options.map((option, idx) => {
                     const isSelected = dailyOptionSelected === idx;
                     const isCorrect = idx === todayQuizzes[dailyIndex].correctIndex || idx === todayQuizzes[dailyIndex].correctAnswer;
+                    const isEliminated = eliminatedOptionIndex === idx;
 
                     let btnStyle = 'bg-slate-50 hover:bg-slate-100 border-slate-200 text-slate-800';
-                    if (dailyAnswered) {
+                    if (isEliminated) {
+                      btnStyle = 'opacity-35 line-through bg-slate-100 border-dashed border-slate-300 text-slate-400 cursor-not-allowed';
+                    } else if (dailyAnswered) {
                       if (isCorrect) {
                         btnStyle = 'bg-emerald-100 border-emerald-400 text-emerald-900 font-black shadow-xs';
                       } else if (isSelected) {
@@ -386,7 +436,7 @@ export const LearnPage: React.FC<LearnPageProps> = ({
                     return (
                       <button
                         key={idx}
-                        disabled={dailyAnswered}
+                        disabled={dailyAnswered || isEliminated}
                         onClick={() => handleDailyOptionSelect(idx)}
                         className={`w-full p-3.5 rounded-2xl border text-left text-xs font-bold transition-all tap-bounce flex items-center justify-between ${btnStyle}`}
                       >
@@ -673,11 +723,47 @@ export const LearnPage: React.FC<LearnPageProps> = ({
             )}
           </div>
 
-          <div className="px-4 pt-2">
-            <RotatingSponsorAdCard />
-          </div>
         </div>
       )}
+
+      {/* Rewarded Video Modal for Double Quiz Points */}
+      <AdMobRewardedModal
+        isOpen={showRewardedDouble}
+        onClose={() => setShowRewardedDouble(false)}
+        onRewardEarned={(bonus) => {
+          setHasDoubledDailyPoints(true);
+          onEarnPoints(bonus || 50, 'Watched Sponsored Video: Doubled Quiz Points 🪙');
+          setShowRewardedDouble(false);
+        }}
+        baseRewardPoints={50}
+        seniorMode={seniorMode}
+      />
+
+      {/* Rewarded Video Modal for Question Hint */}
+      <AdMobRewardedModal
+        isOpen={showHintRewarded}
+        onClose={() => setShowHintRewarded(false)}
+        onRewardEarned={() => {
+          const nextCount = hintCountToday + 1;
+          setHintCountToday(nextCount);
+          try {
+            localStorage.setItem('joyearn_quiz_hints_today', JSON.stringify({ date: todayDateStr, count: nextCount }));
+          } catch {}
+          const currentQ = todayQuizzes[dailyIndex];
+          if (currentQ) {
+            const correct = currentQ.correctIndex !== undefined ? currentQ.correctIndex : currentQ.correctAnswer;
+            const wrongIndices = currentQ.options
+              .map((_, idx) => idx)
+              .filter((idx) => idx !== correct);
+            if (wrongIndices.length > 0) {
+              setEliminatedOptionIndex(wrongIndices[0]);
+            }
+          }
+          setShowHintRewarded(false);
+        }}
+        baseRewardPoints={0}
+        seniorMode={seniorMode}
+      />
     </div>
   );
 };

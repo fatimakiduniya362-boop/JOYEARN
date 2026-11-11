@@ -1,7 +1,6 @@
 import { darkModeService } from './services/darkModeService';
 import { crashlytics } from './services/crashlytics';
 import { FirstTimeTutorialOverlay } from './components/FirstTimeTutorialOverlay';
-import { AdMobBanner } from './components/AdMobBanner';
 import { PromotedOffersSection } from './components/PromotedOffersSection';
 import React, { useState, useEffect, useRef } from 'react';
 import {
@@ -35,7 +34,9 @@ import {
   Globe,
   Languages,
   Share2,
-  WifiOff
+  WifiOff,
+  Camera,
+  Video
 } from 'lucide-react';
 
 import { ThemeKey, VideoContent, QuizItem, SponsoredTask, WithdrawalRequest, TransactionRecord, ReferralUser } from './types';
@@ -77,7 +78,8 @@ import { ActivityGoals } from './components/ActivityGoals';
 import { PersonalDashboardModal } from './components/PersonalDashboardModal';
 import { StreakLeaderboardModal } from './components/StreakLeaderboardModal';
 import { AdminWithdrawalModal, ADMIN_EMAIL } from './components/AdminWithdrawalModal';
-import { RotatingSponsorAdCard } from './components/SponsorAdCard';
+import { SponsorSection } from './components/SponsorSection';
+import { appSettingsService, FullAppSettings } from './services/appSettingsService';
 import { DailyGoalsWidget } from './components/DailyGoalsWidget';
 import { DailyGoalsCalendarModal } from './components/DailyGoalsCalendarModal';
 import { SponsorAdvertiseModal } from './components/SponsorAdvertiseModal';
@@ -87,13 +89,18 @@ import { CommunityChatModal } from './components/CommunityChatModal';
 import { ShopMarketModal } from './components/ShopMarketModal';
 import { CreatorAgencyModal } from './components/CreatorAgencyModal';
 import { VlogShortsModal } from './components/VlogShortsModal';
+import { VlogsSection } from './components/VlogsSection';
+import { submitVlog } from './services/vlogService';
+import { AdMobInterstitialModal } from './components/AdMobInterstitialModal';
+import { adMobManager } from './services/adMobService';
+import { CameraStudioModal } from './components/CameraStudioModal';
 import { LudoGame } from './components/LudoGame';
 import { useImmersiveMode } from './hooks/useImmersiveMode';
 import { soundService } from './services/soundService';
 import { hapticService } from './services/haptics';
 import { initAuth, logout, deleteCurrentAuthUser, getLastSavedProfile, checkRedirectResult } from './services/googleAuth';
 
-export type NavTab = 'home' | 'watch' | 'learn' | 'tasks' | 'wallet';
+export type NavTab = 'home' | 'watch' | 'vlogs' | 'learn' | 'tasks' | 'wallet';
 
 export type ActiveModalType =
   | null
@@ -120,6 +127,7 @@ export type ActiveModalType =
   | 'shop'
   | 'agency'
   | 'vlogs'
+  | 'camera'
   | 'dailyGoalsCalendar';
 
 export default function App() {
@@ -141,6 +149,38 @@ export default function App() {
     const next = darkModeService.toggle();
     setIsDarkMode(next);
   };
+
+  // One-time data version migration: clear old saved test points, balance, streaks & cache on first run
+  // CRITICAL: NEVER clears the user login session!
+  const CURRENT_DATA_VERSION_KEY = 'joyearn_data_version';
+  const TARGET_DATA_VERSION = 'v4.0.0_real_zero_earnings';
+  if (typeof window !== 'undefined') {
+    try {
+      const currentVer = localStorage.getItem(CURRENT_DATA_VERSION_KEY);
+      if (currentVer !== TARGET_DATA_VERSION) {
+        const keysToClear = [
+          'joyearn_lifetime_points',
+          'joyearn_today_points',
+          'joyearn_last_points_date',
+          'joyearn_transactions',
+          'joyearn_streak_days',
+          'joyearn_claimed_milestones',
+          'joyearn_practiced_letters',
+          'joyearn_top_earners_cache',
+          'joyearn_top_earners_time',
+          'joyearn_custom_weekly_data',
+        ];
+        keysToClear.forEach((k) => localStorage.removeItem(k));
+        for (let i = 0; i < localStorage.length; i++) {
+          const key = localStorage.key(i);
+          if (key && (key.startsWith('joyearn_cloud_user_') || key.startsWith('joyearn_video_claimed_'))) {
+            localStorage.removeItem(key);
+          }
+        }
+        localStorage.setItem(CURRENT_DATA_VERSION_KEY, TARGET_DATA_VERSION);
+      }
+    } catch {}
+  }
 
   // User state
   const [userName, setUserName] = useState(() => localStorage.getItem('joyearn_userName') || 'Learner');
@@ -178,7 +218,8 @@ export default function App() {
   const [authReady, setAuthReady] = useState(false);
   const [serverBusyNotice, setServerBusyNotice] = useState<string | null>(null);
 
-  const [points, setPoints] = useState(1450); // initial JoyPoints balance
+  // Initial JoyPoints balance is strictly 0 for new users
+  const [points, setPoints] = useState<number>(0);
   const [pointsScaling, setPointsScaling] = useState(false);
   const prevPointsRef = useRef(points);
 
@@ -204,13 +245,13 @@ export default function App() {
   const [totalJoyPointsEarned, setTotalJoyPointsEarned] = useState<number>(() => {
     try {
       const saved = localStorage.getItem('joyearn_lifetime_points');
-      return saved ? Math.max(parseInt(saved, 10), 1450) : 1450;
+      return saved ? parseInt(saved, 10) || 0 : 0;
     } catch {
-      return 1450;
+      return 0;
     }
   });
-  const [todayPoints, setTodayPoints] = useState(185);
-  const [streakDays, setStreakDays] = useState(4);
+  const [todayPoints, setTodayPoints] = useState<number>(0);
+  const [streakDays, setStreakDays] = useState<number>(0);
   const [quizStreakFireAnim, setQuizStreakFireAnim] = useState<boolean>(false);
 
   // Claimed Milestone Badges
@@ -356,17 +397,29 @@ export default function App() {
         // Restore points, streak & today's progress from cloud Firestore linked to login
         loadUserDataFromCloud(user.uid).then((cloud) => {
           if (cloud) {
-            if (typeof cloud.points === 'number') setPoints(cloud.points);
-            if (typeof cloud.streakDays === 'number') setStreakDays(cloud.streakDays);
-            if (cloud.lastActiveDate === todayStr && typeof cloud.todayPoints === 'number') {
-              setTodayPoints(cloud.todayPoints);
-            }
+            const realPoints = typeof cloud.points === 'number' ? cloud.points : 0;
+            const realStreak = typeof cloud.streakDays === 'number' ? cloud.streakDays : 0;
+            const realToday = (cloud.lastActiveDate === todayStr && typeof cloud.todayPoints === 'number')
+              ? cloud.todayPoints
+              : 0;
+            const realTotal = typeof (cloud as any).totalEarned === 'number'
+              ? (cloud as any).totalEarned
+              : realPoints;
+
+            setPoints(realPoints);
+            setStreakDays(realStreak);
+            setTodayPoints(realToday);
+            setTotalJoyPointsEarned(realTotal);
           } else {
-            // Initial sync to Firestore
+            // New user: strictly 0 points, 0 balance, 0 streak
+            setPoints(0);
+            setStreakDays(0);
+            setTodayPoints(0);
+            setTotalJoyPointsEarned(0);
             syncUserDataToCloud(user.uid, {
-              points,
-              streakDays,
-              todayPoints,
+              points: 0,
+              streakDays: 0,
+              todayPoints: 0,
               email: user.email,
               displayName: user.displayName,
               lastActiveDate: todayStr,
@@ -482,6 +535,7 @@ export default function App() {
 
   // Active primary bottom navigation tab & navigation history
   const [activeTab, setActiveTab] = useState<NavTab>('home');
+  const [vlogsInitialTab, setVlogsInitialTab] = useState<'videos' | 'vlogs'>('videos');
   // Active modal
   const [activeModal, setActiveModal] = useState<ActiveModalType>(null);
 
@@ -497,6 +551,16 @@ export default function App() {
   useEffect(() => {
     activeModalRef.current = activeModal;
   }, [activeModal]);
+
+  const [appSettings, setAppSettings] = useState<FullAppSettings>(() => appSettingsService.getSettings());
+
+  useEffect(() => {
+    appSettingsService.initRealtimeSync();
+    const unsub = appSettingsService.subscribe((settings) => {
+      setAppSettings(settings);
+    });
+    return unsub;
+  }, []);
 
   // Global Back navigation handler (browser history, Android hardware back, and gesture back)
   useEffect(() => {
@@ -530,22 +594,52 @@ export default function App() {
     return () => window.removeEventListener('popstate', handlePopState);
   }, []);
 
-  const handleSelectTab = (tab: NavTab) => {
+  const [showFeatureExitInterstitial, setShowFeatureExitInterstitial] = useState(false);
+
+  const handleCloseFeatureModal = (featureName: string) => {
+    setActiveModal(null);
+    if (adMobManager.shouldTriggerAdAfterFeature(featureName, currentUser?.email)) {
+      setTimeout(() => {
+        setShowFeatureExitInterstitial(true);
+      }, 500);
+    }
+  };
+
+  const handleSelectTab = (tab: NavTab, initialSubTab?: 'videos' | 'vlogs') => {
     soundService.playClick();
-    if (tab === activeTab) {
+    let targetTab: NavTab = tab;
+    if (tab === 'watch') {
+      setVlogsInitialTab('videos');
+      targetTab = 'vlogs';
+    } else if (tab === 'vlogs') {
+      if (initialSubTab) {
+        setVlogsInitialTab(initialSubTab);
+      }
+    }
+
+    if (targetTab === activeTab) {
       window.scrollTo({ top: 0, behavior: 'smooth' });
       return;
     }
+    // Interstitial shown when user returns to Home from a feature (watch, learn, vlogs, etc., wallet excluded)
+    const prevTab = activeTab;
+    if (prevTab !== 'home' && targetTab === 'home') {
+      if (adMobManager.shouldTriggerAdAfterFeature(prevTab, currentUser?.email)) {
+        setTimeout(() => {
+          setShowFeatureExitInterstitial(true);
+        }, 500);
+      }
+    }
     // Save current tab's scroll position
     tabScrollPositions.current[activeTab] = window.scrollY;
-    tabHistoryRef.current.push(tab);
+    tabHistoryRef.current.push(targetTab);
     try {
-      window.history.pushState({ tab }, '', '');
+      window.history.pushState({ tab: targetTab }, '', '');
     } catch {}
-    setActiveTab(tab);
+    setActiveTab(targetTab);
     // Restore previous scroll position if returning, or open at top position
     requestAnimationFrame(() => {
-      const savedPos = tabScrollPositions.current[tab];
+      const savedPos = tabScrollPositions.current[targetTab];
       if (typeof savedPos === 'number' && savedPos > 0) {
         window.scrollTo({ top: savedPos, behavior: 'instant' });
       } else {
@@ -556,7 +650,10 @@ export default function App() {
 
   const handleCardClick = (cardId: string) => {
     soundService.playClick();
-    if (cardId === 'watch' || cardId === 'learn' || cardId === 'tasks' || cardId === 'wallet') {
+    if (cardId === 'watch') {
+      setVlogsInitialTab('videos');
+      handleSelectTab('vlogs', 'videos');
+    } else if (cardId === 'learn' || cardId === 'tasks' || cardId === 'wallet' || cardId === 'vlogs') {
       handleSelectTab(cardId as NavTab);
     } else {
       try {
@@ -590,6 +687,14 @@ export default function App() {
   const [showRateModal, setShowRateModal] = useState(false);
   const [showStreakLeaderboard, setShowStreakLeaderboard] = useState(false);
   const [showAdminModal, setShowAdminModal] = useState(false);
+
+  // Exclusive Owner Identification: ONLY fatimakiduniya362@gmail.com or active owner email
+  const isOwnerLoggedIn = Boolean(
+    currentUser?.email && (
+      currentUser.email.trim().toLowerCase() === (appSettings.general?.ownerEmail || ADMIN_EMAIL).trim().toLowerCase() ||
+      currentUser.email.trim().toLowerCase() === ADMIN_EMAIL.toLowerCase()
+    )
+  );
 
   // Search & Filter state
   const [searchQuery, setSearchQuery] = useState('');
@@ -637,7 +742,9 @@ export default function App() {
     // Check anti-cheat daily points ceiling
     if (todayPoints >= DAILY_MAX_POINTS) {
       soundService.playClick();
-      alert(`Daily maximum points limit reached (${DAILY_MAX_POINTS.toLocaleString()} Pts). Anti-cheat protection active: please return tomorrow to keep earning!`);
+      try {
+        alert(`Daily maximum points limit reached (${DAILY_MAX_POINTS.toLocaleString()} Pts). Anti-cheat protection active: please return tomorrow to keep earning!`);
+      } catch {}
       return;
     }
 
@@ -757,7 +864,9 @@ export default function App() {
     const todayStr = new Date().toISOString().slice(0, 10);
     if (claimedChestToday) {
       soundService.playClick();
-      alert('You have already claimed your daily bonus today! Return tomorrow for the next bonus.');
+      try {
+        alert('You have already claimed your daily bonus today! Return tomorrow for the next bonus.');
+      } catch {}
       return;
     }
     setClaimedChestToday(true);
@@ -813,7 +922,9 @@ export default function App() {
     setTodayPoints(0);
     setStreakDays(0);
     soundService.playClick();
-    alert('Your account and personal data have been permanently deleted per Google Play Policy.');
+    try {
+      alert('Your account and personal data have been permanently deleted per Google Play Policy.');
+    } catch {}
   };
 
   // User referral code for social sharing & accomplishment invites
@@ -836,7 +947,9 @@ export default function App() {
       });
     } else if (navigator.clipboard) {
       navigator.clipboard.writeText(`${shareText} ${shareUrl}`);
-      alert(`Accomplishment & invite link with referral code ${userReferralCode} copied to clipboard! 📋`);
+      try {
+        alert(`Accomplishment & invite link with referral code ${userReferralCode} copied to clipboard! 📋`);
+      } catch {}
     }
   };
 
@@ -1372,45 +1485,18 @@ export default function App() {
               )}
             </button>
 
-            {/* Google Profile / Sign-in Pill */}
+            {/* Camera & Video Studio Quick Button */}
             <button
               onClick={() => {
                 soundService.playClick();
-                setActiveModal('auth');
+                setActiveModal('camera');
               }}
-              className={`p-1.5 px-3 rounded-2xl text-xs font-black transition-all tap-bounce flex items-center gap-1.5 shadow-xs border ${
-                currentUser
-                  ? 'bg-rose-50 hover:bg-rose-100 border-rose-300 text-rose-800'
-                  : 'bg-white/95 hover:bg-white border-gray-200 text-gray-700'
-              }`}
-              title={
-                currentUser
-                  ? `Logged in: ${currentUser.displayName || currentUser.email}`
-                  : 'Sign in with Google'
-              }
+              className="p-2.5 rounded-2xl bg-gradient-to-br from-rose-50 to-pink-50 hover:from-rose-100 hover:to-pink-100 border border-rose-200 text-xs tap-bounce shadow-xs relative text-rose-600 transition-colors"
+              title="JoyEarn Camera Studio (Take Photo / Record Video 📸🎥)"
             >
-              {currentUser?.photoURL ? (
-                <img
-                  src={currentUser.photoURL}
-                  alt="Avatar"
-                  className="w-4 h-4 rounded-full border border-rose-400 object-cover"
-                  onError={(e) => { (e.currentTarget as HTMLElement).style.display = "none"; }}
-                />
-              ) : (
-                <svg className="w-3.5 h-3.5" viewBox="0 0 24 24">
-                  <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
-                  <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
-                  <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"/>
-                  <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"/>
-                </svg>
-              )}
-              <span className="text-[11px] font-black max-w-[70px] truncate">
-                {currentUser ? (currentUser.displayName?.split(' ')[0] || 'User') : (effectiveUrdu ? 'لاگ ان' : 'Google')}
-              </span>
-              {currentUser?.confirmationEmailSent && (
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" title="Email receipt confirmed" />
-              )}
+              <Camera className="w-4 h-4 text-rose-500" />
             </button>
+
 
             {/* Central Settings Gear Button */}
             <button
@@ -1423,6 +1509,21 @@ export default function App() {
             >
               <Settings className="w-4 h-4 text-slate-700" />
             </button>
+
+            {/* Exclusive Owner Panel Button (Visible ONLY to verified owner) */}
+            {isOwnerLoggedIn && (
+              <button
+                onClick={() => {
+                  soundService.playClick();
+                  setShowAdminModal(true);
+                }}
+                className="px-2.5 py-1.5 rounded-2xl bg-gradient-to-r from-purple-800 to-indigo-800 hover:brightness-110 text-white text-xs tap-bounce shadow-md flex items-center gap-1.5 border border-purple-400/40"
+                title="Owner Panel (Full Control)"
+              >
+                <span className="text-xs">👑</span>
+                <span className="font-black text-[10px] tracking-wide">Owner</span>
+              </button>
+            )}
           </div>
         </header>
 
@@ -1749,21 +1850,108 @@ export default function App() {
           </div>
         </section>
 
-        {/* HONESTY, POLICY & TRANSPARENCY FOOTER BANNER */}
-        <footer className="px-4 py-3 space-y-2 max-w-lg mx-auto w-full">
-          <div className="bg-white/80 border border-gray-200/80 rounded-2xl p-3 text-center space-y-1">
-            <div className="flex items-center justify-center gap-1.5 text-xs font-bold text-gray-700">
-              <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
-              <span>{effectiveUrdu ? 'خاندانی تحفظ اور گوگل پلے تعمیل' : 'Family Safety & Google Play Compliance Guarantee'}</span>
+        {/* 6. JOYEARN CAMERA & VIDEO MAKER STUDIO BANNER */}
+        <section className="px-4 py-2 max-w-lg mx-auto w-full">
+          <div
+            onClick={() => {
+              soundService.playClick();
+              setActiveModal('camera');
+            }}
+            className="bg-gradient-to-r from-purple-600 via-pink-600 to-rose-500 text-white rounded-3xl p-4 shadow-md hover:shadow-xl transition-all cursor-pointer tap-bounce border-2 border-pink-300 relative overflow-hidden group"
+          >
+            <div className="absolute top-0 right-0 bg-pink-400 text-pink-950 font-black text-[9.5px] px-3 py-0.5 rounded-bl-2xl uppercase tracking-wider shadow-xs">
+              📸 {effectiveUrdu ? 'کیمرہ اور ویڈیو' : 'Photo & Video Studio'}
             </div>
-            <p className="text-[10px] text-gray-500 leading-relaxed">
-              {effectiveUrdu
-                ? 'JoyEarn تعلیمی حوصلہ افزائی کے لیے ورچوئل پوائنٹس کا استعمال کرتا ہے۔ کوئی نقد رقم یا فرضی آمدنی کا وعدہ نہیں۔ 100% گوگل پلے پالیسی کے مطابق۔'
-                : 'JoyEarn operates exclusively with virtual in-app JoyPoints for educational motivation and cosmetic in-app perks. 100% compliant with Google Play Families and Deceptive Behavior Policies.'}
-            </p>
-          </div>
 
-          {/* Quick Legal & Settings Links */}
+            <div className="flex items-center gap-3.5">
+              <div className="w-14 h-14 rounded-2xl bg-white/20 backdrop-blur-xs flex items-center justify-center text-3xl shadow-inner group-hover:scale-110 transition-transform">
+                📷
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2">
+                  <h3 className="font-black text-base text-white">
+                    {effectiveUrdu ? 'کیمرہ اور ویڈیو اسٹوڈیو' : 'Camera & Video Studio'}
+                  </h3>
+                  <span className="text-[10px] font-black bg-white text-rose-600 px-2 py-0.2 rounded-full shadow-xs">
+                    +50 / +100 Pts
+                  </span>
+                </div>
+                <p className="text-xs text-rose-100 mt-0.5 line-clamp-1">
+                  {effectiveUrdu
+                    ? 'تصویر لیں، فلٹرز اور اسٹیکرز لگائیں، یا تعلیمی وی لاگ ویڈیو ریکارڈ کریں!'
+                    : 'Snap photos with filters & stickers, or record up to 60s educational vlogs!'}
+                </p>
+                <div className="flex items-center gap-2 mt-2">
+                  <span className="text-[11px] font-black text-amber-200 group-hover:text-white transition-colors flex items-center gap-1">
+                    <span>{effectiveUrdu ? 'ابھی کیمرہ کھولیں' : 'Open Camera & Studio'}</span>
+                    <ChevronRight className="w-3.5 h-3.5" />
+                  </span>
+                  <span className="text-[10px] text-white/80 font-bold">
+                    • Photo &amp; Video Mode
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        {/* 7. COMMUNITY VLOGS FEATURE BANNER */}
+        <section className="px-4 py-2 max-w-lg mx-auto w-full">
+          <div
+            onClick={() => {
+              soundService.playClick();
+              handleSelectTab('vlogs', 'vlogs');
+            }}
+            className="bg-gradient-to-r from-red-600 via-rose-600 to-pink-600 text-white rounded-3xl p-4 shadow-md hover:shadow-xl transition-all cursor-pointer tap-bounce border-2 border-red-300 relative overflow-hidden group"
+          >
+            <div className="absolute top-0 right-0 bg-red-400 text-red-950 font-black text-[9.5px] px-3 py-0.5 rounded-bl-2xl uppercase tracking-wider shadow-xs">
+              📹 {effectiveUrdu ? 'کمیونٹی وی لاگز' : 'Community Vlogs'}
+            </div>
+
+            <div className="flex items-center gap-3.5">
+              <div className="w-14 h-14 rounded-2xl bg-white/20 backdrop-blur-xs flex items-center justify-center text-3xl shadow-inner group-hover:scale-110 transition-transform">
+                🎥
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2">
+                  <h3 className="font-black text-base text-white">
+                    {effectiveUrdu ? 'کمیونٹی وی لاگز' : 'Community Vlogs'}
+                  </h3>
+                  <span className="text-[10px] font-black bg-white text-rose-600 px-2 py-0.2 rounded-full shadow-xs">
+                    {effectiveUrdu ? 'دیکھیں اور شیئر کریں' : 'Watch & Share'}
+                  </span>
+                </div>
+                <p className="text-xs text-rose-100 mt-0.5 line-clamp-1">
+                  {effectiveUrdu
+                    ? 'دیگر صارفین کے فیملی وی لاگز دیکھیں یا اپنا یوٹیوب لنک شیئر کریں!'
+                    : 'Watch vlogs shared by other learners or share your own YouTube link!'}
+                </p>
+                <div className="flex items-center gap-2 mt-2">
+                  <span className="text-[11px] font-black text-amber-200 group-hover:text-white transition-colors flex items-center gap-1">
+                    <span>{effectiveUrdu ? 'وی لاگز دیکھیں' : 'Explore Community Vlogs'}</span>
+                    <ChevronRight className="w-3.5 h-3.5" />
+                  </span>
+                  <span className="text-[10px] text-white/80 font-bold">
+                    • 100% Family-Safe
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        {/* 8. SINGLE DEDICATED SPONSORS SHOWCASE */}
+        {appSettings.features.enableSponsorsSection && (
+          <section className="px-4 py-2 max-w-lg mx-auto w-full">
+            <SponsorSection
+              seniorMode={effectiveUrdu}
+              onOpenAdvertiseModal={() => setShowAdvertiseModal(true)}
+            />
+          </section>
+        )}
+
+        {/* Quick Legal & Settings Links */}
+        <footer className="px-4 py-3 max-w-lg mx-auto w-full">
           <div className="flex items-center justify-center gap-3 text-xs font-bold text-slate-500 pt-1">
             <button
               onClick={() => {
@@ -1784,29 +1972,8 @@ export default function App() {
             >
               {effectiveUrdu ? 'پرائیویسی پالیسی' : 'Privacy Policy'}
             </button>
-
           </div>
         </footer>
-
-        {/* POLICY-COMPLIANT GOOGLE ADMOB FAMILY BANNER */}
-        {!hasAdFree && (
-          <div className="max-w-lg mx-auto w-full px-3">
-            <div className="bg-slate-100 rounded-2xl border border-slate-200/90 py-1.5 px-3 flex items-center justify-between text-[11px] text-slate-500">
-              <div className="flex items-center gap-1.5 font-bold text-slate-600">
-                <span className="bg-slate-300 text-slate-700 px-1 py-0.2 rounded text-[9px] uppercase font-black">
-                  Ad
-                </span>
-                <span>Google AdMob • Family-Safe Learning Partner</span>
-              </div>
-              <button
-                onClick={() => handleSelectTab('wallet')}
-                className="text-blue-600 font-extrabold hover:underline tap-bounce"
-              >
-                Remove Ads ($1.99)
-              </button>
-            </div>
-          </div>
-        )}
           </div>
         )}
 
@@ -1824,6 +1991,30 @@ export default function App() {
             }}
             onBackToHome={() => handleSelectTab('home')}
           />
+        )}
+
+        {/* DEDICATED VIDEOS & COMMUNITY VLOGS PAGE */}
+        {activeTab === 'vlogs' && (
+          <div className="pb-24">
+            <VlogsSection
+              isOpen={true}
+              onClose={() => handleSelectTab('home')}
+              currentUser={currentUser}
+              seniorMode={effectiveUrdu}
+              onOpenLiveCamera={() => setActiveModal('camera')}
+              onOpenAuth={() => setActiveModal('auth')}
+              initialTab={vlogsInitialTab}
+              videos={videos}
+              onEarnPoints={handleEarnPoints}
+              onToggleOffline={handleToggleOffline}
+              watchedVideoIds={watchedVideoIds}
+              onCompleteVideo={(videoId) => {
+                setWatchedVideoIds((prev) => (prev.includes(videoId) ? prev : [...prev, videoId]));
+                markMandatoryTaskDone('daily_video');
+              }}
+              isModal={false}
+            />
+          </div>
         )}
 
         {/* DEDICATED LEARN EDUCATIONAL PAGE */}
@@ -1877,6 +2068,7 @@ export default function App() {
             streakDays={streakDays}
             todayPoints={todayPoints}
             onBackToHome={() => handleSelectTab('home')}
+            onOpenLiveCamera={() => setActiveModal('camera')}
           />
         )}
 
@@ -1917,7 +2109,7 @@ export default function App() {
               setGamesCompletedCount((c) => Math.min(3, c + 1));
               handleEarnPoints(pts, reason);
             }}
-            onClose={() => setActiveModal(null)}
+            onClose={() => handleCloseFeatureModal('play')}
             seniorMode={effectiveUrdu}
             onTriggerConfetti={handleTriggerConfetti}
           />
@@ -1941,11 +2133,11 @@ export default function App() {
         )}
 
         {activeModal === 'kids' && (
-          <KidsZone onClose={() => setActiveModal(null)} seniorMode={effectiveUrdu} />
+          <KidsZone onClose={() => handleCloseFeatureModal('kids')} seniorMode={effectiveUrdu} />
         )}
 
         {activeModal === 'garden' && (
-          <VirtualGarden onClose={() => setActiveModal(null)} seniorMode={effectiveUrdu} />
+          <VirtualGarden onClose={() => handleCloseFeatureModal('garden')} seniorMode={effectiveUrdu} />
         )}
 
         {activeModal === 'chest' && (
@@ -1953,7 +2145,7 @@ export default function App() {
             streak={streakDays}
             claimedToday={claimedChestToday}
             onClaimDaily={handleClaimChest}
-            onClose={() => setActiveModal(null)}
+            onClose={() => handleCloseFeatureModal('chest')}
           />
         )}
 
@@ -1971,7 +2163,7 @@ export default function App() {
         {activeModal === 'wheel' && (
           <LuckyWheelModal
             onEarnPoints={handleEarnPoints}
-            onClose={() => setActiveModal(null)}
+            onClose={() => handleCloseFeatureModal('wheel')}
             seniorMode={effectiveUrdu}
             hasSpunToday={hasSpunWheelToday}
             onSpinCompleted={handleWheelSpinCompleted}
@@ -2039,7 +2231,7 @@ export default function App() {
         {activeModal === 'shop' && (
           <ShopMarketModal
             isOpen={true}
-            onClose={() => setActiveModal(null)}
+            onClose={() => handleCloseFeatureModal('shop')}
             userPoints={points}
             onPurchaseItem={(cost) => setPoints((p) => Math.max(0, p - cost))}
             seniorMode={effectiveUrdu}
@@ -2055,12 +2247,66 @@ export default function App() {
           />
         )}
 
-        {/* Educational Vlogs & Shorts Modal */}
+        {/* Community Vlogs Modal */}
         {activeModal === 'vlogs' && (
-          <VlogShortsModal
+          <VlogsSection
+            isOpen={true}
+            onClose={() => handleCloseFeatureModal('vlogs')}
+            currentUser={currentUser}
+            seniorMode={effectiveUrdu}
+            onOpenLiveCamera={() => setActiveModal('camera')}
+            onOpenAuth={() => setActiveModal('auth')}
+            initialTab={vlogsInitialTab}
+            videos={videos}
+            onEarnPoints={handleEarnPoints}
+            onToggleOffline={handleToggleOffline}
+            watchedVideoIds={watchedVideoIds}
+            onCompleteVideo={(videoId) => {
+              setWatchedVideoIds((prev) => (prev.includes(videoId) ? prev : [...prev, videoId]));
+              markMandatoryTaskDone('daily_video');
+            }}
+            isModal={true}
+          />
+        )}
+
+        {/* JoyEarn Camera & Video Maker Studio Modal */}
+        {activeModal === 'camera' && (
+          <CameraStudioModal
             isOpen={true}
             onClose={() => setActiveModal(null)}
             seniorMode={effectiveUrdu}
+            onEarnPoints={handleEarnPoints}
+            currentUser={currentUser}
+            onSetProfilePhoto={(photoUrl) => {
+              if (currentUser) {
+                const updated = { ...currentUser, photoURL: photoUrl };
+                setCurrentUser(updated);
+                try {
+                  localStorage.setItem('joyearn_app_user', JSON.stringify(updated));
+                } catch {}
+              }
+            }}
+            onPublishVlog={async (vlog) => {
+              handleEarnPoints(100, `Published Video: ${vlog.title} 🎬`);
+              if (currentUser) {
+                try {
+                  await submitVlog({
+                    uid: currentUser.uid,
+                    creatorName: currentUser.displayName || 'Community Creator',
+                    title: vlog.title,
+                    description: `Recorded live with JoyEarn Camera Studio • Duration: ${vlog.duration}`,
+                    category: (vlog.category as any) || 'funny and wholesome',
+                    videoType: 'recorded',
+                    videoBlob: vlog.videoBlob,
+                    videoUrl: vlog.videoUrl,
+                    duration: vlog.duration,
+                    isShort: true,
+                  });
+                } catch (e) {
+                  console.warn('Could not auto-submit recorded vlog:', e);
+                }
+              }
+            }}
           />
         )}
 
@@ -2268,6 +2514,13 @@ export default function App() {
         isOpen={showAdvertiseModal}
         onClose={() => setShowAdvertiseModal(false)}
         currentUser={currentUser}
+        seniorMode={effectiveUrdu}
+      />
+
+      {/* Policy-Safe Interstitial on Returning to Home from Features */}
+      <AdMobInterstitialModal
+        isOpen={showFeatureExitInterstitial}
+        onClose={() => setShowFeatureExitInterstitial(false)}
         seniorMode={effectiveUrdu}
       />
 

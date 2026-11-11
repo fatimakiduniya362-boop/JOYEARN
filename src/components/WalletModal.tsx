@@ -38,9 +38,8 @@ export const MIN_WITHDRAW_POINTS = MIN_WITHDRAW_USD * POINTS_PER_DOLLAR; // Mini
 export const DAILY_MAX_POINTS = 2500; // Anti-cheat: max points earnable per day
 export const REWARDED_VIDEO_COOLDOWN_SECONDS = 120; // 2 minutes cooldown between rewarded video claims
 
-// Mandatory Regulatory Notice for Wallet and Withdraw screens
 export const MANDATORY_REWARDS_NOTICE =
-  'Rewards depend on ad revenue, are reviewed manually and are not guaranteed. Amounts may be very small.';
+  'Points ki koi fixed cash value nahi hai.';
 
 interface WalletModalProps {
   points: number;
@@ -225,7 +224,9 @@ export const WalletModal: React.FC<WalletModalProps> = ({
     } catch (err: any) {
       console.error('Withdrawal error:', err);
       setIsSubmittingWithdrawal(false);
-      alert(err?.message || 'Unable to process withdrawal right now. Please try again.');
+      try {
+        alert(err?.message || 'Unable to process withdrawal right now. Please try again.');
+      } catch {}
     }
   };
 
@@ -235,7 +236,9 @@ export const WalletModal: React.FC<WalletModalProps> = ({
     if (points < perk.pointsCost) {
       soundService.playClick();
       hapticService.warning();
-      alert(`You need ${perk.pointsCost - points} more JoyPoints to unlock this perk!`);
+      try {
+        alert(`You need ${perk.pointsCost - points} more JoyPoints to unlock this perk!`);
+      } catch {}
       return;
     }
 
@@ -259,13 +262,17 @@ export const WalletModal: React.FC<WalletModalProps> = ({
 
     if (cooldownRemaining > 0) {
       soundService.playClick();
-      alert(`Anti-cheat cooldown active: Please wait ${cooldownRemaining}s before watching another sponsored video.`);
+      try {
+        alert(`Anti-cheat cooldown active: Please wait ${cooldownRemaining}s before watching another sponsored video.`);
+      } catch {}
       return;
     }
 
     // Check daily max limit
     if (todayPoints >= DAILY_MAX_POINTS) {
-      alert(`Daily points limit reached (${DAILY_MAX_POINTS} Pts). Please return tomorrow to continue earning!`);
+      try {
+        alert(`Daily points limit reached (${DAILY_MAX_POINTS} Pts). Please return tomorrow to continue earning!`);
+      } catch {}
       return;
     }
 

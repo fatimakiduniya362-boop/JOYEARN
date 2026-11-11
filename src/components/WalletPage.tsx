@@ -29,7 +29,6 @@ import {
 import { TransactionRecord, AppUser, PaymentMethodType, WithdrawalRequest } from '../types';
 import { soundService } from '../services/soundService';
 import { useHaptics } from '../hooks/useHaptics';
-import { RotatingSponsorAdCard } from './SponsorAdCard';
 import { submitWithdrawalRequestToCloud, loadUserWithdrawals } from '../services/firestoreService';
 import {
   DAILY_MAX_POINTS,
@@ -95,8 +94,8 @@ interface WalletPageProps {
 export const WalletPage: React.FC<WalletPageProps> = ({
   points,
   todayPoints,
-  totalJoyPointsEarned = 1450,
-  completedTasksCount = 4,
+  totalJoyPointsEarned = 0,
+  completedTasksCount = 0,
   transactions,
   onEarnPoints,
   onDeductPoints,
@@ -609,7 +608,7 @@ export const WalletPage: React.FC<WalletPageProps> = ({
                 {seniorMode ? 'والیٹ اور محفوظ کیش آؤٹ' : 'Wallet & Rewards'}
               </h1>
               <p className="text-xs text-sky-100 font-medium">
-                Verified genuine rewards • 100% pool-backed
+                Verified genuine rewards • Ad revenue backed
               </p>
             </div>
           </div>
@@ -939,20 +938,9 @@ export const WalletPage: React.FC<WalletPageProps> = ({
             </div>
           </div>
 
-          <RotatingSponsorAdCard />
-
-          {/* Policy Compliance Guarantee Notice */}
-          <div className="bg-sky-50/80 border border-sky-200 rounded-2xl p-3.5 text-xs text-sky-900 space-y-2 shadow-2xs">
-            <div className="font-extrabold flex items-center gap-1.5">
-              <ShieldCheck className="w-4 h-4 text-sky-600 shrink-0" />
-              <span>Transparent & Authentic Rewards Guarantee</span>
-            </div>
-            <p className="text-[11px] leading-relaxed text-sky-800">
-              {MANDATORY_REWARDS_NOTICE}
-            </p>
-            <p className="text-[11px] leading-relaxed text-slate-700 font-semibold bg-white/70 p-2.5 rounded-xl border border-sky-100">
-              {POOL_REVENUE_NOTICE}
-            </p>
+          {/* Simple Note */}
+          <div className="bg-slate-50 dark:bg-slate-850 border border-slate-200 dark:border-slate-800 rounded-2xl p-3 text-center text-xs font-medium text-slate-500 dark:text-slate-400">
+            Points ki koi fixed cash value nahi hai.
           </div>
         </div>
       )}
@@ -1015,7 +1003,7 @@ export const WalletPage: React.FC<WalletPageProps> = ({
               </div>
 
               <p className="text-[11px] text-emerald-800 leading-snug">
-                Your request has been securely recorded. Our human review team verifies payout compliance to protect against fraudulent automation. Payouts are paid strictly from the monthly 30% users&apos; rewards pool.
+                Your withdrawal request has been securely recorded for review.
               </p>
             </div>
           )}
@@ -1488,7 +1476,7 @@ export const WalletPage: React.FC<WalletPageProps> = ({
                   <span className="font-bold text-slate-700">{PAYOUT_REVIEW_TEXT}</span>
                 </div>
                 <p className="text-[10px] text-slate-500 pt-1 leading-snug border-t border-slate-200">
-                  Transfer fees are deducted from the payout amount, not from the owner&apos;s share.
+                  Transfer fees are deducted from the payout amount.
                 </p>
               </div>
 
@@ -1847,7 +1835,7 @@ export const WalletPage: React.FC<WalletPageProps> = ({
                     Points Summary:
                   </span>
                   <p className="text-[11px] text-slate-600 leading-relaxed">
-                    Points have no fixed dollar value. Rewards are credited from the monthly 30% users&apos; pool when published by the administration.
+                    Points ki koi fixed cash value nahi hai.
                   </p>
                 </div>
 

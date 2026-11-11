@@ -31,7 +31,6 @@ import { VideoHistory } from './VideoHistory';
 import { PlaylistBar } from './PlaylistBar';
 import { AddToPlaylistModal } from './AddToPlaylistModal';
 import { playlistService } from '../services/playlistService';
-import { RotatingSponsorAdCard } from './SponsorAdCard';
 
 interface WatchPageProps {
   videos?: VideoContent[];
@@ -106,7 +105,7 @@ export const WatchPage: React.FC<WatchPageProps> = ({
     return allVideos.filter((v) => v.approved !== false);
   }, [allVideos]);
 
-  // Dynamically calculate non-empty categories
+  // Keep all standard categories visible (Science, Arts, Cooking, Nature) plus any Firestore categories
   const dynamicCategories = useMemo(() => {
     const set = new Set<string>();
     approvedVideos.forEach((v) => {
@@ -115,12 +114,10 @@ export const WatchPage: React.FC<WatchPageProps> = ({
       }
     });
 
-    // Desired priority order: All, Science, Arts, Cooking, Nature, then others
-    const priority = ['Science', 'Arts', 'Cooking', 'Nature'];
-    const presentPriority = priority.filter((p) => set.has(p));
-    const otherCats = Array.from(set).filter((c) => !priority.includes(c)).sort();
+    const standardCategories = ['Science', 'Arts', 'Cooking', 'Nature'];
+    const otherCats = Array.from(set).filter((c) => !standardCategories.includes(c)).sort();
 
-    return ['All', ...presentPriority, ...otherCats];
+    return ['All', ...standardCategories, ...otherCats];
   }, [approvedVideos]);
 
   // Active Category filter
@@ -467,8 +464,9 @@ export const WatchPage: React.FC<WatchPageProps> = ({
                   if (activeVideo) {
                     quarantineVideo(activeVideo.id);
                     setReported(true);
-                    soundService.playClick();
-                    alert('Thank you! This video has been quarantined and removed.');
+                    try {
+                      alert('Thank you! This video has been quarantined and removed.');
+                    } catch {}
                     handleBackToWatchList();
                   }
                 }}
@@ -481,8 +479,6 @@ export const WatchPage: React.FC<WatchPageProps> = ({
               </button>
             </div>
           </div>
-
-          <RotatingSponsorAdCard />
 
           {/* More in Category */}
           <div className="space-y-2.5 pt-2">
@@ -650,10 +646,6 @@ export const WatchPage: React.FC<WatchPageProps> = ({
             />
           </div>
 
-          {/* Sponsor Ad Banner */}
-          <div className="px-4">
-            <RotatingSponsorAdCard />
-          </div>
 
           {/* Recently Watched Videos Strip */}
           {historyVideos.length > 0 && !activePlaylistId && (
@@ -704,9 +696,9 @@ export const WatchPage: React.FC<WatchPageProps> = ({
                 <div className="w-12 h-12 mx-auto rounded-2xl bg-pink-50 text-pink-500 flex items-center justify-center">
                   <ShieldCheck className="w-6 h-6 text-pink-500" />
                 </div>
-                <h3 className="font-black text-slate-800 text-sm">No Matching Videos</h3>
+                <h3 className="font-black text-slate-800 text-sm">New videos coming soon</h3>
                 <p className="text-xs text-slate-500 max-w-sm mx-auto leading-relaxed">
-                  No approved videos found in this category or search query.
+                  No playable videos in &ldquo;{activeCategory}&rdquo; yet. New educational videos are coming soon!
                 </p>
                 <button
                   onClick={() => {

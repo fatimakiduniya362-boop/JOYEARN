@@ -19,7 +19,8 @@ import {
   ChevronRight,
   PartyPopper,
   Edit3,
-  Check
+  Check,
+  Camera
 } from 'lucide-react';
 import { soundService } from '../services/soundService';
 import { useHaptics } from '../hooks/useHaptics';
@@ -126,57 +127,17 @@ export const PersonalDashboardModal: React.FC<PersonalDashboardModalProps> = ({
   const dailyGoalTarget = 5;
   const progressPercent = Math.min(100, Math.round((completedActivitiesCount / dailyGoalTarget) * 100));
 
-  // Recent earning records
-  const recentHistory: HistoryItem[] = [
+  // Recent earning records - only populated when user has real points/activity
+  const recentHistory: HistoryItem[] = currentPoints > 0 ? [
     {
       id: 'h1',
-      title: 'Daily Goal Perfection (5/5 Activities)',
-      points: 100,
-      timeAgo: 'Just now',
-      category: 'streak',
-      icon: '🎯'
-    },
-    {
-      id: 'h2',
-      title: 'Science & World Trivia Champion Quiz',
-      points: 40,
-      timeAgo: '12m ago',
-      category: 'quiz',
-      icon: '🧠'
-    },
-    {
-      id: 'h3',
-      title: 'Educational Video: Space Exploration',
-      points: 25,
-      timeAgo: '45m ago',
-      category: 'video',
-      icon: '🎬'
-    },
-    {
-      id: 'h4',
-      title: 'Lucky Wheel Daily Spin Bonus',
-      points: 50,
-      timeAgo: '2h ago',
-      category: 'wheel',
-      icon: '🎡'
-    },
-    {
-      id: 'h5',
-      title: `Daily Learning Streak Bonus (Day ${streakDays})`,
-      points: 75,
-      timeAgo: '5h ago',
+      title: `Daily Learning Streak Activity (Day ${streakDays})`,
+      points: Math.min(currentPoints, 50),
+      timeAgo: 'Recent activity',
       category: 'streak',
       icon: '🔥'
-    },
-    {
-      id: 'h6',
-      title: 'Golden Mystery Scratch Card',
-      points: 30,
-      timeAgo: '1d ago',
-      category: 'scratch',
-      icon: '✨'
     }
-  ];
+  ] : [];
 
   const handleCelebrate = () => {
     soundService.playFanfare();
@@ -991,7 +952,7 @@ export const PersonalDashboardModal: React.FC<PersonalDashboardModalProps> = ({
               {/* Stats highlights */}
               <div className="grid grid-cols-2 gap-2 text-center text-xs">
                 <div className="p-3 bg-indigo-50 border border-indigo-200 rounded-2xl">
-                  <div className="text-xl font-black text-indigo-900">94.8%</div>
+                  <div className="text-xl font-black text-indigo-900">{currentPoints > 0 ? '94.8%' : '0%'}</div>
                   <div className="text-[10px] text-indigo-700 font-bold uppercase tracking-wider">Quiz Accuracy</div>
                 </div>
                 <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-2xl">
@@ -1009,24 +970,32 @@ export const PersonalDashboardModal: React.FC<PersonalDashboardModalProps> = ({
                 Recent Reward Records:
               </div>
 
-              <div className="divide-y divide-gray-100 bg-white border border-gray-200 rounded-2xl shadow-xs overflow-hidden">
-                {recentHistory.map((item) => (
-                  <div key={item.id} className="p-3 flex items-center justify-between gap-2.5 hover:bg-slate-50/80 transition-colors">
-                    <div className="flex items-center gap-2.5 min-w-0">
-                      <span className="w-8 h-8 rounded-xl bg-slate-100 flex items-center justify-center text-base shrink-0">
-                        {item.icon}
-                      </span>
-                      <div className="min-w-0">
-                        <div className="font-black text-xs text-slate-900 truncate">{item.title}</div>
-                        <div className="text-[10px] text-slate-500 font-medium">{item.timeAgo}</div>
+              {recentHistory.length === 0 ? (
+                <div className="p-6 text-center text-xs text-slate-500 bg-white border border-gray-200 rounded-2xl space-y-1">
+                  <span className="text-2xl block mb-1">🌱</span>
+                  <div className="font-bold text-slate-700">No activity recorded yet</div>
+                  <p className="text-[11px] text-slate-400">Complete a quiz, watch an educational lesson, or check in to earn real JoyPoints!</p>
+                </div>
+              ) : (
+                <div className="divide-y divide-gray-100 bg-white border border-gray-200 rounded-2xl shadow-xs overflow-hidden">
+                  {recentHistory.map((item) => (
+                    <div key={item.id} className="p-3 flex items-center justify-between gap-2.5 hover:bg-slate-50/80 transition-colors">
+                      <div className="flex items-center gap-2.5 min-w-0">
+                        <span className="w-8 h-8 rounded-xl bg-slate-100 flex items-center justify-center text-base shrink-0">
+                          {item.icon}
+                        </span>
+                        <div className="min-w-0">
+                          <div className="font-black text-xs text-slate-900 truncate">{item.title}</div>
+                          <div className="text-[10px] text-slate-500 font-medium">{item.timeAgo}</div>
+                        </div>
                       </div>
+                      <span className="text-xs font-black text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-lg border border-emerald-200 shrink-0">
+                        +{item.points} Pts
+                      </span>
                     </div>
-                    <span className="text-xs font-black text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-lg border border-emerald-200 shrink-0">
-                      +{item.points} Pts
-                    </span>
-                  </div>
-                ))}
-              </div>
+                  ))}
+                </div>
+              )}
             </div>
           )}
         </div>

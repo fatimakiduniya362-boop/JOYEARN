@@ -29,53 +29,53 @@ interface DayData {
 }
 
 export const WeeklyStreakChart: React.FC<WeeklyStreakChartProps> = ({
-  streakDays,
+  streakDays = 0,
   seniorMode = false,
-  totalActivitiesCount = 12,
+  totalActivitiesCount = 0,
 }) => {
   const [metric, setMetric] = useState<'activities' | 'points'>('activities');
 
-  // Generate 7-day activity completion data matching user's streak
+  // Generate 7-day activity completion data matching user's real streak (0 for new users)
   const streakData: DayData[] = [
     {
       day: 'Mon',
       urduDay: 'پیر',
       fullDay: 'Monday',
-      activities: 3,
-      points: 140,
+      activities: streakDays >= 1 ? 3 : 0,
+      points: streakDays >= 1 ? 140 : 0,
       isCompleted: streakDays >= 1,
       isToday: streakDays === 1,
-      status: streakDays >= 1 ? 'Completed' : 'Skipped',
+      status: streakDays >= 1 ? 'Completed' : 'Upcoming Target',
     },
     {
       day: 'Tue',
       urduDay: 'منگل',
       fullDay: 'Tuesday',
-      activities: 4,
-      points: 175,
+      activities: streakDays >= 2 ? 4 : 0,
+      points: streakDays >= 2 ? 175 : 0,
       isCompleted: streakDays >= 2,
       isToday: streakDays === 2,
-      status: streakDays >= 2 ? 'Completed' : 'Skipped',
+      status: streakDays >= 2 ? 'Completed' : 'Upcoming Target',
     },
     {
       day: 'Wed',
       urduDay: 'بدھ',
       fullDay: 'Wednesday',
-      activities: 3,
-      points: 160,
+      activities: streakDays >= 3 ? 3 : 0,
+      points: streakDays >= 3 ? 160 : 0,
       isCompleted: streakDays >= 3,
       isToday: streakDays === 3,
-      status: streakDays >= 3 ? 'Completed' : 'Skipped',
+      status: streakDays >= 3 ? 'Completed' : 'Upcoming Target',
     },
     {
       day: 'Thu',
       urduDay: 'جمعرات',
       fullDay: 'Thursday',
-      activities: Math.max(2, Math.min(6, Math.floor(totalActivitiesCount / 2))),
-      points: 185,
+      activities: streakDays >= 4 ? Math.max(1, Math.min(6, Math.floor(totalActivitiesCount / 2))) : 0,
+      points: streakDays >= 4 ? 185 : 0,
       isCompleted: streakDays >= 4,
       isToday: streakDays === 4,
-      status: streakDays === 4 ? 'Today (Active)' : streakDays > 4 ? 'Completed' : 'Upcoming',
+      status: streakDays === 4 ? 'Today (Active)' : streakDays > 4 ? 'Completed' : 'Upcoming Target',
     },
     {
       day: 'Fri',

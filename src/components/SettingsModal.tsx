@@ -43,6 +43,7 @@ import { darkModeService } from '../services/darkModeService';
 import { hapticService } from '../services/haptics';
 import { VirtualCurrencyDisclaimer } from './VirtualCurrencyDisclaimer';
 import { ADMIN_EMAIL } from './AdminWithdrawalModal';
+import { appSettingsService } from '../services/appSettingsService';
 
 interface SettingsModalProps {
   onClose: () => void;
@@ -338,44 +339,57 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     </div>
                   </div>
 
-                  <div className="flex gap-2 pt-1 border-t border-rose-200/60">
-                    <button
-                      onClick={() => {
-                        soundService.playClick();
-                        onOpenAuthModal();
-                      }}
-                      className="flex-1 py-1.5 bg-white hover:bg-rose-100/60 text-rose-700 font-bold rounded-xl text-xs border border-rose-200 tap-bounce"
-                    >
-                      {currentUser.confirmationEmailSent ? 'Resend Receipt ✉️' : 'Get Email Receipt ✉️'}
-                    </button>
-                    <button
-                      onClick={() => {
-                        soundService.playClick();
-                        onOpenAuthModal();
-                      }}
-                      className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-xs tap-bounce"
-                    >
-                      Manage
-                    </button>
-                  </div>
-
-                  {/* Admin Portal Button - Only visible for ADMIN_EMAIL */}
-                  {(currentUser.email?.toLowerCase() === ADMIN_EMAIL.toLowerCase() || localStorage.getItem('joyearn_admin_override') === 'true') && onOpenAdmin && (
-                    <div className="pt-2 border-t border-rose-200/60">
+                  <div className="grid grid-cols-2 gap-2 pt-1 border-t border-rose-200/60">
+                    {onLogout && (
                       <button
                         onClick={() => {
                           soundService.playClick();
+                          onLogout();
                           onClose();
-                          onOpenAdmin();
                         }}
-                        className="w-full py-2 bg-gradient-to-r from-red-600 via-rose-600 to-amber-600 hover:from-red-700 hover:to-amber-700 text-white font-black rounded-xl text-xs shadow-md tap-bounce flex items-center justify-center gap-2"
+                        className="py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-xs tap-bounce text-center"
                       >
-                        <span>🛡️</span>
-                        <span>Open Admin Withdrawal Portal</span>
-                        <span className="text-[10px] bg-black/25 px-1.5 py-0.5 rounded-full uppercase">Staff</span>
+                        {isUrdu ? 'لاگ آؤٹ' : 'Log Out'}
                       </button>
-                    </div>
-                  )}
+                    )}
+                    <button
+                      onClick={() => {
+                        soundService.playClick();
+                        setShowDeleteModal(true);
+                      }}
+                      className="py-1.5 bg-rose-100/70 hover:bg-rose-200/80 text-rose-700 font-bold rounded-xl text-xs tap-bounce text-center"
+                    >
+                      {isUrdu ? 'اکاؤنٹ ڈیلیٹ کریں' : 'Delete My Account'}
+                    </button>
+                  </div>
+
+                  {/* Owner Panel Button - ONLY visible for fatimakiduniya362@gmail.com or active owner */}
+                  {(() => {
+                    const activeOwnerEmail = (appSettingsService.getSettings().general?.ownerEmail || ADMIN_EMAIL).trim().toLowerCase();
+                    const isOwner = Boolean(
+                      currentUser.email && (
+                        currentUser.email.trim().toLowerCase() === activeOwnerEmail ||
+                        currentUser.email.trim().toLowerCase() === ADMIN_EMAIL.toLowerCase()
+                      )
+                    );
+                    if (!isOwner || !onOpenAdmin) return null;
+                    return (
+                      <div className="pt-2 border-t border-rose-200/60">
+                        <button
+                          onClick={() => {
+                            soundService.playClick();
+                            onClose();
+                            onOpenAdmin();
+                          }}
+                          className="w-full py-2.5 bg-gradient-to-r from-purple-800 via-indigo-700 to-rose-700 hover:brightness-110 text-white font-black rounded-xl text-xs shadow-lg tap-bounce flex items-center justify-center gap-2 border border-purple-400/30"
+                        >
+                          <span className="text-sm">👑</span>
+                          <span>{isUrdu ? 'مالک پینل (Owner Panel)' : 'Owner Panel (Full Control)'}</span>
+                          <span className="text-[10px] bg-amber-400 text-slate-950 font-black px-1.5 py-0.5 rounded-full uppercase">Owner</span>
+                        </button>
+                      </div>
+                    );
+                  })()}
                 </div>
               ) : (
                 <div className="space-y-2 text-center">
@@ -1301,7 +1315,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 </div>
                 <div className="flex-1 overflow-y-auto space-y-2.5 text-xs text-slate-600 dark:text-slate-300 pr-1 text-left leading-relaxed">
                   <p><strong>1. Educational & Family Purpose:</strong> JoyEarn is designed for educational enrichment, daily family quizzes, and wholesome knowledge discovery.</p>
-                  <p><strong>2. Ad-Funded Rewards & Cash Withdrawals:</strong> Rewards depend on ad revenue, are reviewed manually and are not guaranteed. Amounts may be very small. Fake, duplicate or invalid activity will be rejected.</p>
+                  <p><strong>2. Ad-Funded Rewards & Cash Withdrawals:</strong> Rewards depend on ad revenue, are reviewed manually and are not guaranteed. Fake, duplicate or invalid activity will be rejected.</p>
                   <p><strong>3. Fair Use & Anti-Cheat:</strong> Points must be earned honestly through gameplay, quizzes, streaks, and viewing optional rewarded ads. Automated bots, clicking tricks, duplicate accounts, and fraudulent activity are prohibited and will result in rejected payouts.</p>
                   <p><strong>4. Contact & Support:</strong> For payment inquiries or account support, contact us at <code>fatimakiduniya362@gmail.com</code>.</p>
                 </div>
@@ -1363,6 +1377,15 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     </h4>
                     <p className="text-[11px]">
                       Earn JoyPoints fairly through your own daily quizzes, practice challenges, and genuine learning streaks.
+                    </p>
+                  </div>
+
+                  <div className="p-2.5 bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-800 rounded-xl space-y-1">
+                    <h4 className="font-black text-rose-900 dark:text-rose-200 text-[11px] flex items-center gap-1.5">
+                      <span>📹</span> 5. Community Vlogs &amp; Video Sharing Safety
+                    </h4>
+                    <p className="text-[11px]">
+                      Users can upload device videos (short and long), record live videos with the in-app camera, or share optional YouTube links. You must own or have permission to share the content, and it must be 100% wholesome, educational, and suitable for all ages. Zero tolerance for vulgarity, nudity, hate speech, or suggestive themes. Every video is held in review before appearing in public feeds.
                     </p>
                   </div>
                 </div>

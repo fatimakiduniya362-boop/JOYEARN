@@ -58,9 +58,9 @@ export default defineConfig(() => {
         ],
         manifest: {
           id: '/',
-          name: 'JoyEarn: Global Rewards & Learning',
+          name: 'JoyEarn - Family Friendly Rewards & Learning',
           short_name: 'JoyEarn',
-          description: 'Safe, ethical global family rewards and learning app with international USD payouts, quizzes, and educational entertainment worldwide.',
+          description: 'A colorful, safe, family-friendly mobile platform combining legitimate rewards, safe entertainment, education, mini-games, and offline videos.',
           theme_color: '#f43f5e',
           background_color: '#ffffff',
           display: 'standalone',

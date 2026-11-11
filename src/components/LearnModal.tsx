@@ -38,7 +38,6 @@ import { QUIZ_LEADERBOARD_MOCK } from '../data/mockData';
 import { hapticService } from '../services/haptics';
 import { soundService } from '../services/soundService';
 import { StreakFireCelebration } from './StreakFireCelebration';
-import { RotatingSponsorAdCard } from './SponsorAdCard';
 
 export type DifficultyLevel = 'Beginner' | 'Intermediate' | 'Advanced';
 
@@ -151,6 +150,21 @@ export const LearnModal: React.FC<LearnModalProps> = ({
   // AdMob Fullscreen State
   const [showInterstitial, setShowInterstitial] = useState(false);
   const [showRewarded, setShowRewarded] = useState(false);
+  const [showHintRewardedModal, setShowHintRewardedModal] = useState(false);
+
+  // Daily Hints via Rewarded Video (Max 2 hints per day, hidden when ads disabled)
+  const todayDateStr = new Date().toISOString().slice(0, 10);
+  const [hintCountToday, setHintCountToday] = useState<number>(() => {
+    try {
+      const saved = localStorage.getItem('joyearn_quiz_hints_today');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed.date === todayDateStr) return parsed.count;
+      }
+    } catch {}
+    return 0;
+  });
+  const [eliminatedOptionIndex, setEliminatedOptionIndex] = useState<number | null>(null);
 
   // Live timer for midnight countdown
   useEffect(() => {
@@ -365,6 +379,7 @@ export const LearnModal: React.FC<LearnModalProps> = ({
 
   const handleNextDailyQuestion = () => {
     soundService.playClick();
+    setEliminatedOptionIndex(null);
     if (dailyIndex < 4) {
       setDailyIndex((i) => i + 1);
       setDailySelectedOption(null);
@@ -538,15 +553,17 @@ export const LearnModal: React.FC<LearnModalProps> = ({
                       </div>
                     </div>
 
-                    {/* Rewarded Video Bonus Option (AdMob) */}
-                    <button
-                      type="button"
-                      onClick={() => setShowRewarded(true)}
-                      className="w-full max-w-xs mx-auto py-2.5 bg-gradient-to-r from-amber-400 to-orange-500 text-slate-950 font-black rounded-xl text-xs shadow-md tap-bounce flex items-center justify-center gap-2"
-                    >
-                      <Sparkles className="w-4 h-4 fill-slate-950" />
-                      <span>{seniorMode ? 'ویڈیو دیکھ کر پوائنٹس ڈبل کریں (2x)' : 'Watch Video to Double Points (2x)'}</span>
-                    </button>
+                    {/* Rewarded Video Bonus Option (AdMob) - Visible only when ADS_ENABLED is true */}
+                    {adMobManager.getConfig().adsEnabled && (
+                      <button
+                        type="button"
+                        onClick={() => setShowRewarded(true)}
+                        className="w-full max-w-xs mx-auto py-2.5 bg-gradient-to-r from-amber-400 to-orange-500 text-slate-950 font-black rounded-xl text-xs shadow-md tap-bounce flex items-center justify-center gap-2"
+                      >
+                        <Sparkles className="w-4 h-4 fill-slate-950" />
+                        <span>{seniorMode ? 'ویڈیو دیکھ کر پوائنٹس ڈبل کریں (2x)' : 'Watch Video to Double Points (2x)'}</span>
+                      </button>
+                    )}
 
                     {/* Practice button */}
                     <button
@@ -591,9 +608,26 @@ export const LearnModal: React.FC<LearnModalProps> = ({
                     {/* Question Card */}
                     {dailyQuizzes[dailyIndex] && (
                       <div className="bg-gradient-to-b from-indigo-50/60 to-white dark:from-slate-800 dark:to-slate-850 p-4 rounded-3xl border-2 border-indigo-200 dark:border-slate-700 shadow-sm space-y-3">
-                        <h3 className="font-black text-sm sm:text-base text-slate-900 dark:text-white leading-snug">
-                          {dailyQuizzes[dailyIndex].question}
-                        </h3>
+                        <div className="flex items-start justify-between gap-2">
+                          <h3 className="font-black text-sm sm:text-base text-slate-900 dark:text-white leading-snug">
+                            {dailyQuizzes[dailyIndex].question}
+                          </h3>
+                        </div>
+
+                        {/* Rewarded Video Hint Button (Max 2/day, hidden if ads disabled) */}
+                        {adMobManager.getConfig().adsEnabled && hintCountToday < 2 && !isDailyAnswered && (
+                          <div className="flex justify-end">
+                            <button
+                              type="button"
+                              onClick={() => setShowHintRewardedModal(true)}
+                              className="inline-flex items-center gap-1 px-2.5 py-1 bg-amber-100 dark:bg-amber-950/80 text-amber-900 dark:text-amber-200 border border-amber-300 dark:border-amber-700 rounded-full text-[10.5px] font-bold tap-bounce hover:bg-amber-200"
+                            >
+                              <Sparkles className="w-3 h-3 text-amber-600 dark:text-amber-400" />
+                              <span>{seniorMode ? `اشارہ حاصل کریں (${2 - hintCountToday} باقی)` : `Watch Video for Hint (${2 - hintCountToday} left) 💡`}</span>
+                            </button>
+                          </div>
+                        )}
+
                         {seniorMode && dailyQuizzes[dailyIndex].urduQuestion && (
                           <p className="text-xs text-indigo-800 dark:text-indigo-300 font-serif font-bold">
                             {dailyQuizzes[dailyIndex].urduQuestion}
@@ -605,9 +639,12 @@ export const LearnModal: React.FC<LearnModalProps> = ({
                           {dailyQuizzes[dailyIndex].options.map((opt, oIdx) => {
                             const isChosen = dailySelectedOption === oIdx;
                             const isCorrectOpt = oIdx === dailyQuizzes[dailyIndex].correctAnswer;
+                            const isEliminated = eliminatedOptionIndex === oIdx;
 
                             let optStyle = 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 hover:border-indigo-400 text-slate-800 dark:text-slate-100';
-                            if (isDailyAnswered) {
+                            if (isEliminated) {
+                              optStyle = 'opacity-35 line-through bg-slate-100 dark:bg-slate-900 border-dashed border-slate-300 dark:border-slate-800 text-slate-400 cursor-not-allowed';
+                            } else if (isDailyAnswered) {
                               if (isCorrectOpt) {
                                 optStyle = 'bg-emerald-50 dark:bg-emerald-950/60 border-emerald-500 text-emerald-800 dark:text-emerald-200 font-bold';
                               } else if (isChosen) {
@@ -621,7 +658,7 @@ export const LearnModal: React.FC<LearnModalProps> = ({
                               <button
                                 key={oIdx}
                                 type="button"
-                                disabled={isDailyAnswered}
+                                disabled={isDailyAnswered || isEliminated}
                                 onClick={() => handleSelectDailyOption(oIdx)}
                                 className={`w-full p-3 rounded-2xl border-2 text-left font-semibold text-xs transition-all flex items-center justify-between tap-bounce ${optStyle}`}
                               >
@@ -645,12 +682,6 @@ export const LearnModal: React.FC<LearnModalProps> = ({
                           </div>
                         )}
 
-                        {/* Sponsor Ad Between Quiz Questions */}
-                        {isDailyAnswered && (
-                          <div className="pt-1">
-                            <RotatingSponsorAdCard variant="compact" />
-                          </div>
-                        )}
 
                         {/* Next Question / Finish Daily Quiz Button */}
                         {isDailyAnswered && (
@@ -1037,10 +1068,6 @@ export const LearnModal: React.FC<LearnModalProps> = ({
               </div>
               <p className="text-gray-700 leading-relaxed font-medium">{currentQuiz.fact}</p>
 
-              {/* Sponsor Card Between Questions */}
-              <div className="pt-1">
-                <RotatingSponsorAdCard variant="compact" />
-              </div>
 
               <div className="flex gap-2 pt-2">
                 {isTimeExpired && (
@@ -1296,12 +1323,37 @@ export const LearnModal: React.FC<LearnModalProps> = ({
         seniorMode={seniorMode}
       />
 
-      {/* AdMob Rewarded Video Modal */}
+      {/* AdMob Rewarded Video Modal for Double Points */}
       <AdMobRewardedModal
         isOpen={showRewarded}
         onClose={() => setShowRewarded(false)}
         onRewardEarned={(bonus) => onEarnPoints(bonus, 'Watched Sponsored Video: Doubled Quiz Points 🪙')}
         baseRewardPoints={50}
+        seniorMode={seniorMode}
+      />
+
+      {/* AdMob Rewarded Video Modal for Quiz Hint */}
+      <AdMobRewardedModal
+        isOpen={showHintRewardedModal}
+        onClose={() => setShowHintRewardedModal(false)}
+        onRewardEarned={() => {
+          const nextCount = hintCountToday + 1;
+          setHintCountToday(nextCount);
+          try {
+            localStorage.setItem('joyearn_quiz_hints_today', JSON.stringify({ date: todayDateStr, count: nextCount }));
+          } catch {}
+          const currentQ = dailyQuizzes[dailyIndex];
+          if (currentQ) {
+            const wrongIndices = currentQ.options
+              .map((_, idx) => idx)
+              .filter((idx) => idx !== currentQ.correctAnswer);
+            if (wrongIndices.length > 0) {
+              setEliminatedOptionIndex(wrongIndices[0]);
+            }
+          }
+          setShowHintRewardedModal(false);
+        }}
+        baseRewardPoints={0}
         seniorMode={seniorMode}
       />
 

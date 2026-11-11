@@ -14,13 +14,13 @@ import {
   Users,
   Sparkles,
   Clock,
-  Compass
+  Compass,
+  Camera
 } from 'lucide-react';
 import { SponsoredTask } from '../types';
 import { MandatoryTaskId } from '../utils/dailyTasksConfig';
 import { soundService } from '../services/soundService';
 import { useHaptics } from '../hooks/useHaptics';
-import { RotatingSponsorAdCard } from './SponsorAdCard';
 import { getScheduledDailyTask, getScheduleDayNumber, ScheduledDailyQuest } from '../services/contentScheduleService';
 
 interface TasksPageProps {
@@ -33,6 +33,7 @@ interface TasksPageProps {
   streakDays?: number;
   todayPoints?: number;
   onBackToHome?: () => void;
+  onOpenLiveCamera?: () => void;
 }
 
 export const TasksPage: React.FC<TasksPageProps> = ({
@@ -45,6 +46,7 @@ export const TasksPage: React.FC<TasksPageProps> = ({
   streakDays = 5,
   todayPoints = 0,
   onBackToHome,
+  onOpenLiveCamera,
 }) => {
   const { success, selection } = useHaptics();
 
@@ -394,6 +396,44 @@ export const TasksPage: React.FC<TasksPageProps> = ({
         </div>
       </div>
 
+      {/* Creative Camera Quest Card */}
+      {onOpenLiveCamera && (
+        <div className="px-3 pt-1">
+          <div className="bg-gradient-to-r from-purple-500 via-pink-500 to-rose-500 text-white rounded-3xl p-4 shadow-md flex items-center justify-between gap-3 border border-pink-300/40">
+            <div className="flex items-center gap-3 min-w-0">
+              <div className="w-11 h-11 rounded-2xl bg-white/20 backdrop-blur-xs flex items-center justify-center text-2xl shrink-0">
+                📸
+              </div>
+              <div className="min-w-0">
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <span className="text-[9.5px] font-black uppercase tracking-wider bg-white/20 px-2 py-0.5 rounded-full">
+                    Creative Challenge
+                  </span>
+                  <span className="text-amber-200 text-xs font-black">+100 JoyPoints</span>
+                </div>
+                <h3 className="font-black text-xs sm:text-sm mt-0.5 truncate text-white">
+                  {seniorMode ? 'کیمرہ سے تصویر لیں یا ویڈیو بنائیں' : 'Snap a Photo or Record a 15s Vlog'}
+                </h3>
+                <p className="text-[11px] text-pink-100 line-clamp-1">
+                  {seniorMode ? 'فلٹرز، اسٹیکرز اور ایچ ڈی کوالٹی کے ساتھ' : 'Use live filters, stickers & camera studio'}
+                </p>
+              </div>
+            </div>
+
+            <button
+              onClick={() => {
+                soundService.playClick();
+                onOpenLiveCamera();
+              }}
+              className="px-3.5 py-2 bg-white text-rose-600 hover:bg-rose-50 rounded-xl font-black text-xs tap-bounce shadow-md shrink-0 flex items-center gap-1.5"
+            >
+              <Camera className="w-3.5 h-3.5" />
+              <span>{seniorMode ? 'کیمرہ کھولیں' : 'Open Camera'}</span>
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Section 2: Verified Community & Partner Tasks */}
       <div className="p-3 pt-1 space-y-3">
         <div className="flex items-center justify-between px-1">
@@ -462,10 +502,6 @@ export const TasksPage: React.FC<TasksPageProps> = ({
         </div>
       </div>
 
-      {/* Rotating Sponsor Card */}
-      <div className="p-3 pt-0">
-        <RotatingSponsorAdCard />
-      </div>
 
       {/* Task Completion Workflow Modal */}
       {activeTaskModal && (

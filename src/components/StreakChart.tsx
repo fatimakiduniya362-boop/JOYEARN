@@ -42,9 +42,9 @@ export interface DayStreakRecord {
 }
 
 export const StreakChart: React.FC<StreakChartProps> = ({
-  streakDays = 5,
+  streakDays = 0,
   seniorMode = false,
-  totalActivitiesCount = 12,
+  totalActivitiesCount = 0,
 }) => {
   const [chartView, setChartView] = useState<'area' | 'bar'>('area');
   const [metric, setMetric] = useState<'activities' | 'points'>('activities');
@@ -60,7 +60,7 @@ export const StreakChart: React.FC<StreakChartProps> = ({
       d.setDate(now.getDate() - i);
 
       const isToday = i === 0;
-      const inCurrentStreak = i < streakDays;
+      const inCurrentStreak = streakDays > 0 && i < streakDays;
 
       // Realistic activity distribution based on current streak and user profile
       let activities = 0;
@@ -69,19 +69,13 @@ export const StreakChart: React.FC<StreakChartProps> = ({
       if (inCurrentStreak) {
         // High engaged activity during active streak
         activities = isToday
-          ? Math.max(2, Math.min(6, Math.floor(totalActivitiesCount / 2)))
+          ? Math.max(1, Math.min(6, Math.floor(totalActivitiesCount / 2)))
           : 3 + ((i * 3 + 1) % 4);
         points = activities * 35 + ((i * 17) % 30);
       } else {
-        // Past activity with periodic high completion days
-        const patternVal = (i * 7 + 3) % 10;
-        if (patternVal > 3) {
-          activities = 1 + (patternVal % 4);
-          points = activities * 30 + 15;
-        } else {
-          activities = 0;
-          points = 0;
-        }
+        // Zero synthetic points for new users or days without real streak
+        activities = 0;
+        points = 0;
       }
 
       const isCompleted = activities > 0;

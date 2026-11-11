@@ -109,7 +109,10 @@ export const LiveStreamModal: React.FC<LiveStreamModalProps> = ({
 
   const handleSendGift = (giftName: string, cost: number, icon: string) => {
     if (userPoints < cost) {
-      alert(`You need ${cost} JoyPoints to send this gift!`);
+      soundService.playWrong();
+      try {
+        alert(`You need ${cost} JoyPoints to send this gift!`);
+      } catch {}
       return;
     }
     if (onSpendPoints) onSpendPoints(cost);

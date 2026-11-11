@@ -11,14 +11,18 @@ import { hapticService } from './haptics';
 
 class SoundService {
   private ctx: AudioContext | null = null;
-  private isMuted: boolean = false;
-  private volume: number = 0.7; // default 70% volume
+  private isMuted: boolean = false; // Sounds ON by default
+  private volume: number = 0.85; // Clear default volume
+  private isUnlocked: boolean = false;
+  private muteListeners: Set<(muted: boolean) => void> = new Set();
 
   constructor() {
     if (typeof window !== 'undefined') {
       const savedMute = localStorage.getItem('joyearn_sound_muted');
       if (savedMute !== null) {
         this.isMuted = savedMute === 'true';
+      } else {
+        this.isMuted = false; // Explicitly ensure sound is ON by default
       }
       const savedVol = localStorage.getItem('joyearn_sound_volume');
       if (savedVol !== null) {
@@ -27,6 +31,48 @@ class SoundService {
           this.volume = parsed;
         }
       }
+      this.setupFirstTapUnlock();
+    }
+  }
+
+  private setupFirstTapUnlock() {
+    if (typeof window === 'undefined') return;
+    const unlock = () => {
+      this.unlockAudio();
+      window.removeEventListener('pointerdown', unlock, true);
+      window.removeEventListener('touchstart', unlock, true);
+      window.removeEventListener('click', unlock, true);
+      window.removeEventListener('keydown', unlock, true);
+    };
+    window.addEventListener('pointerdown', unlock, { passive: true, capture: true });
+    window.addEventListener('touchstart', unlock, { passive: true, capture: true });
+    window.addEventListener('click', unlock, { passive: true, capture: true });
+    window.addEventListener('keydown', unlock, { passive: true, capture: true });
+  }
+
+  public unlockAudio() {
+    this.isUnlocked = true;
+    this.initContext();
+    if (this.ctx && this.ctx.state === 'suspended') {
+      this.ctx.resume().catch(() => {});
+    }
+    // Prime Audio hardware with 1-sample silent buffer for iOS Safari
+    if (this.ctx) {
+      try {
+        const buffer = this.ctx.createBuffer(1, 1, 22050);
+        const source = this.ctx.createBufferSource();
+        source.buffer = buffer;
+        source.connect(this.ctx.destination);
+        source.start(0);
+      } catch {}
+    }
+    // Resume SpeechSynthesis on first tap
+    if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+      try {
+        if (window.speechSynthesis.paused) {
+          window.speechSynthesis.resume();
+        }
+      } catch {}
     }
   }
 
@@ -51,7 +97,22 @@ class SoundService {
     this.isMuted = muted;
     if (typeof window !== 'undefined') {
       localStorage.setItem('joyearn_sound_muted', String(muted));
+      if (muted && 'speechSynthesis' in window) {
+        window.speechSynthesis.cancel();
+      }
     }
+    this.muteListeners.forEach((listener) => {
+      try {
+        listener(muted);
+      } catch {}
+    });
+  }
+
+  public subscribeMute(listener: (muted: boolean) => void): () => void {
+    this.muteListeners.add(listener);
+    return () => {
+      this.muteListeners.delete(listener);
+    };
   }
 
   public getVolume(): number {
@@ -63,6 +124,119 @@ class SoundService {
     this.volume = clamped;
     if (typeof window !== 'undefined') {
       localStorage.setItem('joyearn_sound_volume', String(clamped));
+    }
+  }
+
+  /**
+   * Cheerful acoustic pentatonic chime for letters, numbers, and phonics taps.
+   * Guarantees audible feedback even on devices without speech synthesis or TTS offline.
+   */
+  public playLetterChime(identifier: string = 'A') {
+    if (this.isMuted || this.volume <= 0) return;
+    try {
+      this.unlockAudio();
+      if (!this.ctx) return;
+      const now = this.ctx.currentTime;
+
+      const code = identifier.toUpperCase().charCodeAt(0) || 65;
+      const pentatonic = [
+        261.63, 293.66, 329.63, 392.00, 440.00, // C4, D4, E4, G4, A4
+        523.25, 587.33, 659.25, 783.99, 880.00, // C5, D5, E5, G5, A5
+        1046.50                                  // C6
+      ];
+      const baseFreq = pentatonic[code % pentatonic.length];
+
+      // Primary tone
+      const osc1 = this.ctx.createOscillator();
+      const gain1 = this.ctx.createGain();
+      osc1.type = 'sine';
+      osc1.frequency.setValueAtTime(baseFreq, now);
+
+      const peak1 = 0.12 * this.volume;
+      gain1.gain.setValueAtTime(0, now);
+      gain1.gain.linearRampToValueAtTime(peak1, now + 0.015);
+      gain1.gain.exponentialRampToValueAtTime(0.0001, now + 0.28);
+
+      osc1.connect(gain1);
+      gain1.connect(this.ctx.destination);
+      osc1.start(now);
+      osc1.stop(now + 0.28);
+
+      // Warm octave/fifth harmonic for rich marimba/xylophone timbre
+      const osc2 = this.ctx.createOscillator();
+      const gain2 = this.ctx.createGain();
+      osc2.type = 'triangle';
+      osc2.frequency.setValueAtTime(baseFreq * 1.5, now);
+
+      const peak2 = 0.05 * this.volume;
+      gain2.gain.setValueAtTime(0, now);
+      gain2.gain.linearRampToValueAtTime(peak2, now + 0.01);
+      gain2.gain.exponentialRampToValueAtTime(0.0001, now + 0.22);
+
+      osc2.connect(gain2);
+      gain2.connect(this.ctx.destination);
+      osc2.start(now);
+      osc2.stop(now + 0.22);
+
+      this.triggerHaptic(25);
+    } catch {
+      // Audio fallback
+    }
+  }
+
+  /**
+   * Speaks phonics/word/letter text aloud using browser speech synthesis,
+   * preceded by an immediate chime tone so feedback is immediate and loud.
+   */
+  public speakPhonics(text: string, lang: string = 'en-US') {
+    if (this.isMuted || this.volume <= 0) return;
+
+    // 1. Play immediate musical tone for the letter
+    this.playLetterChime(text.charAt(0) || 'A');
+
+    // 2. Speak via window.speechSynthesis
+    if (typeof window === 'undefined' || !('speechSynthesis' in window)) {
+      return;
+    }
+
+    try {
+      this.unlockAudio();
+
+      if (window.speechSynthesis.paused) {
+        window.speechSynthesis.resume();
+      }
+
+      window.speechSynthesis.cancel();
+
+      const utterance = new SpeechSynthesisUtterance(text);
+      utterance.lang = lang;
+      utterance.rate = 0.88; // gentle, clear phonics speed
+      utterance.pitch = 1.05; // warm, encouraging tone
+      utterance.volume = Math.max(0.2, Math.min(1.0, this.volume));
+
+      // Match voice if available
+      const voices = window.speechSynthesis.getVoices();
+      if (voices && voices.length > 0) {
+        const preferredVoice = voices.find(
+          (v) => (v.lang.startsWith(lang.slice(0, 2)) || v.lang.includes('en')) && !v.name.includes('Bad')
+        );
+        if (preferredVoice) {
+          utterance.voice = preferredVoice;
+        }
+      }
+
+      setTimeout(() => {
+        try {
+          if (window.speechSynthesis.paused) {
+            window.speechSynthesis.resume();
+          }
+          window.speechSynthesis.speak(utterance);
+        } catch (e) {
+          console.warn('Speech synthesis speak error:', e);
+        }
+      }, 25);
+    } catch (e) {
+      console.warn('Speech synthesis error:', e);
     }
   }
 

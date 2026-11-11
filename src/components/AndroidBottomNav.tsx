@@ -1,10 +1,10 @@
 import React from 'react';
-import { Home, Play, BookOpen, CheckSquare, Wallet, Trophy, Sparkles } from 'lucide-react';
+import { Home, Play, BookOpen, CheckSquare, Wallet, Trophy, Sparkles, Video } from 'lucide-react';
 import { hapticService } from '../services/haptics';
 
 interface AndroidBottomNavProps {
-  activeTab: 'home' | 'watch' | 'learn' | 'tasks' | 'wallet' | 'badges';
-  onSelectTab: (tab: 'home' | 'watch' | 'learn' | 'tasks' | 'wallet' | 'badges') => void;
+  activeTab: 'home' | 'watch' | 'vlogs' | 'learn' | 'tasks' | 'wallet' | 'badges';
+  onSelectTab: (tab: 'home' | 'watch' | 'vlogs' | 'learn' | 'tasks' | 'wallet' | 'badges') => void;
   seniorMode: boolean;
   uncompletedTasksCount: number;
 }
@@ -23,10 +23,10 @@ export const AndroidBottomNav: React.FC<AndroidBottomNavProps> = ({
       icon: Home,
     },
     {
-      id: 'watch' as const,
-      label: 'Watch',
-      urduLabel: 'ویڈیو',
-      icon: Play,
+      id: 'vlogs' as const,
+      label: 'Vlogs',
+      urduLabel: 'وی لاگز',
+      icon: Video,
     },
     {
       id: 'learn' as const,
@@ -49,13 +49,13 @@ export const AndroidBottomNav: React.FC<AndroidBottomNavProps> = ({
     },
   ];
 
-  const handleTabClick = (tabId: 'home' | 'watch' | 'learn' | 'tasks' | 'wallet' | 'badges') => {
+  const handleTabClick = (tabId: 'home' | 'watch' | 'vlogs' | 'learn' | 'tasks' | 'wallet' | 'badges') => {
     hapticService.selection();
     onSelectTab(tabId);
   };
 
   return (
-    <nav className="w-full bg-white/95 dark:bg-slate-900/95 backdrop-blur-md border-t border-gray-200/80 dark:border-slate-800 px-2 py-1.5 flex items-center justify-around z-30 shadow-lg">
+    <nav className="w-full bg-white/95 dark:bg-slate-900/95 backdrop-blur-md border-t border-gray-200/80 dark:border-slate-800 px-1 py-1.5 grid grid-cols-5 z-30 shadow-lg">
       {tabs.map((tab) => {
         const isActive = activeTab === tab.id;
         const IconComponent = tab.icon;

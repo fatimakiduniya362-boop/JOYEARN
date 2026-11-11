@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { ShieldCheck, Lock, Volume2, Sparkles, RefreshCw, Palette } from 'lucide-react';
+import { ShieldCheck, Lock, Volume2, VolumeX, Sparkles, RefreshCw, Palette } from 'lucide-react';
+import { soundService } from '../services/soundService';
 
 interface FunZoneProps {
   onClose: () => void;
@@ -11,6 +12,23 @@ export const FunZone: React.FC<FunZoneProps> = ({ onClose, seniorMode }) => {
   const [guardianLocked, setGuardianLocked] = useState(true);
   const [pinInput, setPinInput] = useState('');
   const [showPinDialog, setShowPinDialog] = useState(false);
+  const [pinFeedback, setPinFeedback] = useState<{ message: string; isError: boolean } | null>(null);
+  const [isMuted, setIsMuted] = useState<boolean>(() => soundService.getMuted());
+
+  // Listen to soundService mute state changes
+  useEffect(() => {
+    const unsub = soundService.subscribeMute((muted) => setIsMuted(muted));
+    return unsub;
+  }, []);
+
+  const toggleSound = () => {
+    const next = !isMuted;
+    soundService.setMuted(next);
+    setIsMuted(next);
+    if (!next) {
+      soundService.playSuccess();
+    }
+  };
 
   // Drawing canvas state
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -54,19 +72,9 @@ export const FunZone: React.FC<FunZoneProps> = ({ onClose, seniorMode }) => {
 
   const [activeSpeech, setActiveSpeech] = useState<string | null>(null);
 
-  const speakWord = (text: string) => {
+  const speakWord = (text: string, lang: string = 'en-US') => {
     setActiveSpeech(text);
-    if ('speechSynthesis' in window) {
-      try {
-        window.speechSynthesis.cancel();
-        const utterance = new SpeechSynthesisUtterance(text);
-        utterance.rate = 0.9;
-        utterance.pitch = 1.1;
-        window.speechSynthesis.speak(utterance);
-      } catch (e) {
-        console.warn('Speech synthesis error:', e);
-      }
-    }
+    soundService.speakPhonics(text, lang);
   };
 
   // Canvas drawing handlers
@@ -147,12 +155,26 @@ export const FunZone: React.FC<FunZoneProps> = ({ onClose, seniorMode }) => {
               </p>
             </div>
           </div>
-          <button
-            onClick={onClose}
-            className="w-8 h-8 rounded-full bg-white/40 hover:bg-white/60 flex items-center justify-center text-yellow-950 font-bold"
-          >
-            ✕
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={toggleSound}
+              className={`px-3 py-1.5 rounded-full font-black text-xs flex items-center gap-1.5 transition-all tap-bounce ${
+                isMuted
+                  ? 'bg-rose-950/70 text-rose-200 hover:bg-rose-950'
+                  : 'bg-white text-rose-700 hover:bg-amber-50 shadow-sm'
+              }`}
+              title={isMuted ? 'Sound is muted. Tap to turn sound ON' : 'Sound is ON. Tap to mute'}
+            >
+              {isMuted ? <VolumeX className="w-4 h-4 text-rose-300" /> : <Volume2 className="w-4 h-4 text-emerald-600 animate-pulse" />}
+              <span>{isMuted ? 'Sound: OFF' : 'Sound: ON'}</span>
+            </button>
+            <button
+              onClick={onClose}
+              className="w-8 h-8 rounded-full bg-white/40 hover:bg-white/60 flex items-center justify-center text-yellow-950 font-bold"
+            >
+              ✕
+            </button>
+          </div>
         </div>
 
         {/* Safety Notice Bar */}
@@ -260,22 +282,27 @@ export const FunZone: React.FC<FunZoneProps> = ({ onClose, seniorMode }) => {
           {/* TAB: ALPHABET */}
           {activeTab === 'alphabet' && (
             <div className="space-y-3">
-              <div className="text-center">
-                <h3 className="font-extrabold text-gray-800 text-base">Tap a letter to hear its sound!</h3>
-                {activeSpeech && (
-                  <p className="text-xs text-pink-600 font-bold animate-pulse">Playing: "{activeSpeech}"</p>
+              <div className="text-center space-y-1">
+                <h3 className="font-extrabold text-gray-800 text-base">Tap a letter to hear its sound & phonics!</h3>
+                {activeSpeech ? (
+                  <p className="text-xs text-pink-600 font-bold animate-pulse">🔊 Playing: "{activeSpeech}"</p>
+                ) : (
+                  <p className="text-[11px] text-slate-500 font-semibold flex items-center justify-center gap-1.5">
+                    <Volume2 className="w-3.5 h-3.5 text-pink-500" /> Sounds on by default • Tap any card to hear voice & phonics
+                  </p>
                 )}
               </div>
               <div className="grid grid-cols-2 gap-3">
                 {ALPHABET.map((item) => (
                   <button
                     key={item.letter}
-                    onClick={() => speakWord(`${item.letter} is for ${item.word}`)}
+                    onClick={() => speakWord(`${item.letter}. ${item.word}. Phonics: ${item.sound}`)}
                     className="p-4 bg-white rounded-3xl border-2 border-pink-200 shadow-sm hover:border-pink-400 tap-bounce flex items-center justify-between text-left"
                   >
                     <div>
                       <span className="text-3xl font-black text-pink-500">{item.letter}</span>
                       <p className="text-xs font-bold text-gray-700">{item.word}</p>
+                      <p className="text-[10px] text-pink-600 font-semibold">{item.sound}</p>
                     </div>
                     <span className="text-4xl">{item.emoji}</span>
                   </button>
@@ -288,13 +315,16 @@ export const FunZone: React.FC<FunZoneProps> = ({ onClose, seniorMode }) => {
           {activeTab === 'urdu' && (
             <div className="space-y-3 text-right" dir="rtl">
               <div className="text-center" dir="ltr">
-                <h3 className="font-extrabold text-gray-800 text-base">حرف پر کلک کریں</h3>
+                <h3 className="font-extrabold text-gray-800 text-base">حرف پر کلک کریں اور آواز سنیں</h3>
+                {activeSpeech && (
+                  <p className="text-xs text-emerald-600 font-bold animate-pulse">🔊 {activeSpeech}</p>
+                )}
               </div>
               <div className="grid grid-cols-2 gap-3">
                 {URDU_LETTERS.map((item) => (
                   <button
                     key={item.letter}
-                    onClick={() => speakWord(item.word)}
+                    onClick={() => speakWord(`${item.letter}. ${item.word}`, 'ur-PK')}
                     className="p-4 bg-white rounded-3xl border-2 border-emerald-200 shadow-sm hover:border-emerald-400 tap-bounce flex items-center justify-between text-right"
                   >
                     <div>
@@ -313,12 +343,15 @@ export const FunZone: React.FC<FunZoneProps> = ({ onClose, seniorMode }) => {
             <div className="space-y-3">
               <div className="text-center">
                 <h3 className="font-extrabold text-gray-800 text-base">Counting Stars! 1 to 5</h3>
+                {activeSpeech && (
+                  <p className="text-xs text-amber-600 font-bold animate-pulse">🔊 {activeSpeech}</p>
+                )}
               </div>
               <div className="space-y-2">
                 {NUMBERS.map((n) => (
                   <button
                     key={n.num}
-                    onClick={() => speakWord(`${n.num}, ${n.name}`)}
+                    onClick={() => speakWord(`Number ${n.num}. ${n.name}`)}
                     className="w-full p-3 bg-white rounded-2xl border-2 border-amber-200 shadow-sm flex items-center justify-between tap-bounce"
                   >
                     <div className="flex items-center gap-3">
@@ -339,12 +372,15 @@ export const FunZone: React.FC<FunZoneProps> = ({ onClose, seniorMode }) => {
             <div className="space-y-3">
               <div className="text-center">
                 <h3 className="font-extrabold text-gray-800 text-base">Tap an animal to hear its sound!</h3>
+                {activeSpeech && (
+                  <p className="text-xs text-orange-600 font-bold animate-pulse">🔊 {activeSpeech}</p>
+                )}
               </div>
               <div className="grid grid-cols-2 gap-3">
                 {ANIMAL_SOUNDS.map((animal) => (
                   <button
                     key={animal.name}
-                    onClick={() => speakWord(animal.sound)}
+                    onClick={() => speakWord(`${animal.name} says ${animal.sound}`)}
                     className="p-4 bg-white rounded-3xl border-2 border-orange-200 shadow-sm hover:border-orange-400 tap-bounce flex flex-col items-center justify-center gap-1.5"
                   >
                     <span className="text-5xl">{animal.emoji}</span>
@@ -418,18 +454,28 @@ export const FunZone: React.FC<FunZoneProps> = ({ onClose, seniorMode }) => {
                 placeholder="Answer"
                 className="w-full text-center py-2 px-3 border border-gray-300 rounded-xl text-lg font-black"
               />
+              {pinFeedback && (
+                <p className={`text-xs font-bold ${pinFeedback.isError ? 'text-rose-600' : 'text-emerald-600'} animate-fade-in`}>
+                  {pinFeedback.message}
+                </p>
+              )}
               <div className="flex gap-2">
                 <button
                   onClick={() => {
-                    if (pinInput === '7') {
-                      setShowPinDialog(false);
-                      setPinInput('');
-                      alert('Passcode verified.');
+                    if (pinInput.trim() === '7') {
+                      soundService.playSuccess();
+                      setPinFeedback({ message: '✓ Passcode verified! Parental lock updated.', isError: false });
+                      setTimeout(() => {
+                        setShowPinDialog(false);
+                        setPinInput('');
+                        setPinFeedback(null);
+                      }, 1000);
                     } else {
-                      alert('Incorrect answer.');
+                      soundService.playWrong();
+                      setPinFeedback({ message: '✕ Incorrect answer. Please try again.', isError: true });
                     }
                   }}
-                  className="flex-1 py-2 bg-amber-500 text-white font-bold rounded-xl text-xs"
+                  className="flex-1 py-2 bg-amber-500 hover:bg-amber-600 text-white font-bold rounded-xl text-xs tap-bounce shadow-xs"
                 >
                   Verify
                 </button>
@@ -437,8 +483,9 @@ export const FunZone: React.FC<FunZoneProps> = ({ onClose, seniorMode }) => {
                   onClick={() => {
                     setShowPinDialog(false);
                     setPinInput('');
+                    setPinFeedback(null);
                   }}
-                  className="flex-1 py-2 bg-gray-100 text-gray-700 font-bold rounded-xl text-xs"
+                  className="flex-1 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 font-bold rounded-xl text-xs tap-bounce"
                 >
                   Cancel
                 </button>

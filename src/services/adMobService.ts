@@ -2,86 +2,155 @@
  * ============================================================================
  * 📱 GOOGLE ADMOB CONFIGURATION & SERVICE FOR JOYEARN
  * ============================================================================
- * Replace the test AdMob Unit IDs below with your production IDs from
- * https://apps.admob.com when preparing for final store release.
+ * Supports interstitial frequency capping, daily maximums, cooldowns,
+ * native ad item spacing, format impression tracking for admin revenue targets,
+ * and owner account exemption.
  */
 
-// Global Ads Killswitch / Toggle (Disabled by default, hides all ad slots)
-export const ADS_ENABLED = false;
+import {
+  ADS_ENABLED as STATIC_ADS_ENABLED,
+  AD_AFTER_FEATURE as STATIC_AD_AFTER_FEATURE,
+  INTERSTITIAL_COOLDOWN_SECONDS as STATIC_COOLDOWN_SEC,
+  MAX_FULLSCREEN_ADS_PER_DAY as STATIC_MAX_DAILY,
+  NATIVE_AD_EVERY_N_ITEMS as STATIC_NATIVE_EVERY_N,
+  getDynamicAdsConfig,
+  saveDynamicAdsConfig,
+  DynamicAdsConfig,
+} from '../config/adsConfig';
+
+export const ADS_ENABLED = STATIC_ADS_ENABLED;
+export const AD_AFTER_FEATURE = STATIC_AD_AFTER_FEATURE;
+export const INTERSTITIAL_COOLDOWN_SECONDS = STATIC_COOLDOWN_SEC;
+export const MAX_FULLSCREEN_ADS_PER_DAY = STATIC_MAX_DAILY;
+export const NATIVE_AD_EVERY_N_ITEMS = STATIC_NATIVE_EVERY_N;
 
 export const ADMOB_CONFIG = {
-  // 1. Google AdMob App ID
   ADMOB_APP_ID: 'ca-app-pub-3940256099942544~3347511713',
-
-  // 2. Small Banner Ad Unit (Home Screen footer/header)
   BANNER_HOME_UNIT_ID: 'ca-app-pub-3940256099942544/6300978111',
-
-  // 3. Interstitial Ad Unit (After completed quizzes only)
+  INTERSTITIAL_UNIT_ID: 'ca-app-pub-3940256099942544/1033173712',
+  REWARDED_UNIT_ID: 'ca-app-pub-3940256099942544/5224354917',
+  NATIVE_UNIT_ID: 'ca-app-pub-3940256099942544/2247696110',
   INTERSTITIAL_QUIZ_UNIT_ID: 'ca-app-pub-3940256099942544/1033173712',
-
-  // 4. Rewarded Video Ad Unit ("Watch to double your points")
   REWARDED_POINTS_UNIT_ID: 'ca-app-pub-3940256099942544/5224354917',
-
-  // ============================================================================
-  // SAFETY RULES & FREQUENCY CAPPING
-  // ============================================================================
-  // Interstitial shown after at most every 3rd completed quiz
-  QUIZZES_PER_INTERSTITIAL: 3,
-
-  // Strict rate limit: No more than 1 full-screen ad per 2 minutes (120,000 ms)
-  MIN_TIME_BETWEEN_FULLSCREEN_MS: 120 * 1000,
 };
 
+export type AdFormat = 'banner' | 'native' | 'interstitial' | 'rewarded';
+
+export interface TodayAdImpressions {
+  date: string;
+  banner: number;
+  native: number;
+  interstitial: number;
+  rewarded: number;
+}
+
 class AdMobManager {
-  private lastInterstitialTimestamp: number = 0;
-  private quizzesSinceLastAd: number = 0;
+  private lastFullscreenTimestamp: number = 0;
   private isAdShowing: boolean = false;
-  private rewardedListeners: Set<(reward: number) => void> = new Set();
 
   constructor() {
     if (typeof window !== 'undefined') {
-      const savedTime = localStorage.getItem('joyearn_last_ad_time');
-      if (savedTime) this.lastInterstitialTimestamp = parseInt(savedTime, 10);
-      const savedCount = localStorage.getItem('joyearn_quizzes_since_ad');
-      if (savedCount) this.quizzesSinceLastAd = parseInt(savedCount, 10);
+      const savedTime = localStorage.getItem('joyearn_last_fullscreen_ad_time');
+      if (savedTime) this.lastFullscreenTimestamp = parseInt(savedTime, 10);
     }
   }
 
-  /**
-   * Increments the completed quiz counter. Call only on quiz completion, NEVER during a question.
-   */
-  public onQuizCompleted(): boolean {
-    this.quizzesSinceLastAd += 1;
-    if (typeof window !== 'undefined') {
-      localStorage.setItem('joyearn_quizzes_since_ad', String(this.quizzesSinceLastAd));
+  public getConfig(): DynamicAdsConfig {
+    return getDynamicAdsConfig();
+  }
+
+  public updateConfig(partial: Partial<DynamicAdsConfig>): DynamicAdsConfig {
+    return saveDynamicAdsConfig(partial);
+  }
+
+  private getTodayDateStr(): string {
+    return new Date().toISOString().slice(0, 10);
+  }
+
+  public getTodayImpressions(): TodayAdImpressions {
+    const today = this.getTodayDateStr();
+    if (typeof window === 'undefined') {
+      return { date: today, banner: 0, native: 0, interstitial: 0, rewarded: 0 };
     }
-    return this.shouldShowInterstitial();
+    try {
+      const raw = localStorage.getItem('joyearn_ad_impressions_today');
+      if (raw) {
+        const parsed: TodayAdImpressions = JSON.parse(raw);
+        if (parsed.date === today) {
+          return parsed;
+        }
+      }
+    } catch {}
+    return { date: today, banner: 0, native: 0, interstitial: 0, rewarded: 0 };
+  }
+
+  public recordImpression(format: AdFormat): void {
+    if (typeof window === 'undefined') return;
+    try {
+      const stats = this.getTodayImpressions();
+      stats[format] = (stats[format] || 0) + 1;
+      localStorage.setItem('joyearn_ad_impressions_today', JSON.stringify(stats));
+    } catch {}
+  }
+
+  public getFullscreenCountToday(): number {
+    const stats = this.getTodayImpressions();
+    return (stats.interstitial || 0) + (stats.rewarded || 0);
   }
 
   /**
-   * Checks if an interstitial ad is eligible to be shown based on both 3-quiz threshold and 2-minute cooldown
+   * Checks whether a full-screen interstitial ad is allowed right now:
+   * 1. Dynamic adAfterFeature is true
+   * 2. Owner account is never shown ads
+   * 3. Cooldown has passed (default 90 seconds)
+   * 4. Daily maximum fullscreen ads not reached (default 12)
+   * 5. No ad currently showing
    */
-  public shouldShowInterstitial(): boolean {
+  public canShowInterstitial(userEmail?: string | null): boolean {
+    const config = this.getConfig();
+    if (!config.adAfterFeature) return false;
+
+    // Owner account is completely free of ads
+    if (userEmail && userEmail.toLowerCase() === 'fatimakiduniya362@gmail.com') {
+      return false;
+    }
+
+    if (this.isAdShowing) return false;
+
+    // Cooldown check
     const now = Date.now();
-    const elapsedSinceLastAd = now - this.lastInterstitialTimestamp;
+    const elapsedSeconds = (now - this.lastFullscreenTimestamp) / 1000;
+    if (elapsedSeconds < config.interstitialCooldownSeconds) {
+      return false;
+    }
 
-    const meetsQuizThreshold = this.quizzesSinceLastAd >= ADMOB_CONFIG.QUIZZES_PER_INTERSTITIAL;
-    const meetsTimeCooldown = elapsedSinceLastAd >= ADMOB_CONFIG.MIN_TIME_BETWEEN_FULLSCREEN_MS;
+    // Daily limit check
+    if (this.getFullscreenCountToday() >= config.maxFullscreenAdsPerDay) {
+      return false;
+    }
 
-    return meetsQuizThreshold && meetsTimeCooldown && !this.isAdShowing;
+    return true;
   }
 
   /**
-   * Records that an interstitial ad was displayed and resets counters
+   * Records that an interstitial was displayed, updates cooldown timestamp and impression stats
    */
   public recordInterstitialShown(): void {
     const now = Date.now();
-    this.lastInterstitialTimestamp = now;
-    this.quizzesSinceLastAd = 0;
+    this.lastFullscreenTimestamp = now;
     if (typeof window !== 'undefined') {
-      localStorage.setItem('joyearn_last_ad_time', String(now));
-      localStorage.setItem('joyearn_quizzes_since_ad', '0');
+      localStorage.setItem('joyearn_last_fullscreen_ad_time', String(now));
     }
+    this.recordImpression('interstitial');
+  }
+
+  public recordRewardedShown(): void {
+    const now = Date.now();
+    this.lastFullscreenTimestamp = now;
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('joyearn_last_fullscreen_ad_time', String(now));
+    }
+    this.recordImpression('rewarded');
   }
 
   public setIsAdShowing(showing: boolean) {
@@ -90,6 +159,22 @@ class AdMobManager {
 
   public getIsAdShowing(): boolean {
     return this.isAdShowing;
+  }
+
+  public onQuizCompleted(): boolean {
+    return this.canShowInterstitial();
+  }
+
+  /**
+   * Helper for features returning to home:
+   * Daily quiz result, video watched, game finished, wheel, chest, shop, vlogs
+   * (Wallet excluded).
+   */
+  public shouldTriggerAdAfterFeature(featureName: string, userEmail?: string | null): boolean {
+    if (featureName === 'wallet' || featureName === 'withdraw') {
+      return false; // Excluded by specification
+    }
+    return this.canShowInterstitial(userEmail);
   }
 }
 

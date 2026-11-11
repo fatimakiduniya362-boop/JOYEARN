@@ -10,7 +10,9 @@ import {
   Plus,
   Sparkles,
   CheckCircle2,
-  Flag
+  Flag,
+  Camera,
+  Video
 } from 'lucide-react';
 import { soundService } from '../services/soundService';
 import { useHaptics } from '../hooks/useHaptics';
@@ -21,12 +23,14 @@ interface VlogShortsModalProps {
   isOpen: boolean;
   onClose: () => void;
   seniorMode?: boolean;
+  onOpenLiveCamera?: () => void;
 }
 
 export const VlogShortsModal: React.FC<VlogShortsModalProps> = ({
   isOpen,
   onClose,
-  seniorMode = false
+  seniorMode = false,
+  onOpenLiveCamera
 }) => {
   const [activeTab, setActiveTab] = useState<'feed' | 'upload'>('feed');
   const [likes, setLikes] = useState<Record<string, number>>({
@@ -82,7 +86,20 @@ export const VlogShortsModal: React.FC<VlogShortsModalProps> = ({
               {seniorMode ? 'تعلیمی وی لاگز اور مائیکرو ویڈیوز' : 'Educational Vlogs & Shorts'}
             </span>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1.5">
+            {onOpenLiveCamera && (
+              <button
+                onClick={() => {
+                  soundService.playClick();
+                  onOpenLiveCamera();
+                }}
+                className="px-2.5 py-1 bg-gradient-to-r from-purple-600 to-pink-600 hover:opacity-90 text-white text-xs font-black rounded-xl flex items-center gap-1 tap-bounce shadow-xs"
+                title="Record with Live Camera"
+              >
+                <Camera className="w-3.5 h-3.5" />
+                <span>{seniorMode ? 'کیمرہ' : 'Camera'}</span>
+              </button>
+            )}
             <button
               onClick={() => setActiveTab(activeTab === 'feed' ? 'upload' : 'feed')}
               className="px-2.5 py-1 bg-rose-600 hover:bg-rose-500 text-white text-xs font-black rounded-xl flex items-center gap-1"
@@ -214,12 +231,31 @@ export const VlogShortsModal: React.FC<VlogShortsModalProps> = ({
           )}
 
           {activeTab === 'upload' && (
-            <form onSubmit={handleUpload} className="space-y-4">
-              <div className="border-2 border-dashed border-slate-700 rounded-2xl p-6 text-center space-y-2 hover:border-rose-500 transition-colors">
-                <Upload className="w-8 h-8 text-rose-500 mx-auto" />
-                <div className="text-xs font-black text-white">Select Educational Video / Micro-Vlog</div>
-                <div className="text-[10px] text-slate-400">MP4, MOV up to 60 seconds (Max 50MB)</div>
-              </div>
+            <div className="space-y-4">
+              {onOpenLiveCamera && (
+                <div
+                  onClick={() => {
+                    soundService.playClick();
+                    onOpenLiveCamera();
+                  }}
+                  className="bg-gradient-to-r from-purple-600 via-pink-600 to-rose-600 rounded-2xl p-4 text-center cursor-pointer tap-bounce shadow-md hover:opacity-95 transition-all border border-pink-400/40"
+                >
+                  <Video className="w-8 h-8 text-white mx-auto mb-1.5 animate-pulse" />
+                  <div className="text-xs font-black text-white">
+                    {seniorMode ? 'کیمرہ کھولیں اور لائیو ویڈیو بنائیں' : 'Open Camera & Record Live Video'}
+                  </div>
+                  <div className="text-[10px] text-pink-100 mt-0.5">
+                    {seniorMode ? '۶۰ سیکنڈ تک ویڈیو ریکارڈ کریں اور +۱۰۰ پوائنٹس کمائیں' : 'Record up to 60s educational vlog & earn +100 JoyPoints!'}
+                  </div>
+                </div>
+              )}
+
+              <form onSubmit={handleUpload} className="space-y-4">
+                <div className="border-2 border-dashed border-slate-700 rounded-2xl p-5 text-center space-y-2 hover:border-rose-500 transition-colors">
+                  <Upload className="w-7 h-7 text-rose-500 mx-auto" />
+                  <div className="text-xs font-black text-white">Select Existing Educational Video File</div>
+                  <div className="text-[10px] text-slate-400">MP4, WebM, MOV up to 60 seconds (Max 50MB)</div>
+                </div>
 
               <div className="space-y-1">
                 <label className="text-xs font-bold text-slate-300">Vlog Title / Topic</label>
@@ -261,7 +297,8 @@ export const VlogShortsModal: React.FC<VlogShortsModalProps> = ({
                 </button>
               )}
             </form>
-          )}
+          </div>
+        )}
         </div>
       </div>
     </div>
