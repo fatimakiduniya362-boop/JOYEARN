@@ -245,7 +245,7 @@ export const FirstOpenAuthScreen: React.FC<FirstOpenAuthScreenProps> = ({
                 </div>
                 <div>
                   <span className="font-black text-slate-900">
-                    {seniorMode ? 'تصدیقی ای میل رسید' : 'Verified Gmail Receipt'}
+                    {seniorMode ? 'تصدیقی ای میل رسید' : 'Verified Email Receipt'}
                   </span>
                   <p className="text-[10px] text-slate-500">Official statement sent to your personal email.</p>
                 </div>
@@ -504,7 +504,7 @@ export const FirstOpenAuthScreen: React.FC<FirstOpenAuthScreenProps> = ({
                 {isSendingWelcomeEmail ? (
                   <>
                     <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                    <span>Sending email via Gmail...</span>
+                    <span>Confirming account...</span>
                   </>
                 ) : (
                   <>

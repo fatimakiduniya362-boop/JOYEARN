@@ -39,7 +39,7 @@ export const DAILY_MAX_POINTS = 2500; // Anti-cheat: max points earnable per day
 export const REWARDED_VIDEO_COOLDOWN_SECONDS = 120; // 2 minutes cooldown between rewarded video claims
 
 export const MANDATORY_REWARDS_NOTICE =
-  'Points ki koi fixed cash value nahi hai.';
+  'Rewards depend on ad revenue, are reviewed manually and are not guaranteed.';
 
 interface WalletModalProps {
   points: number;

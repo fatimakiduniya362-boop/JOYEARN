@@ -214,6 +214,16 @@ class SoundService {
       utterance.pitch = 1.05; // warm, encouraging tone
       utterance.volume = Math.max(0.2, Math.min(1.0, this.volume));
 
+      // Prevent Android Chromium garbage collection bug from terminating speech prematurely
+      (window as any)._activeUtterance = utterance;
+      utterance.onend = () => {
+        (window as any)._activeUtterance = null;
+      };
+      utterance.onerror = (e) => {
+        console.warn('Speech synthesis utterance notice:', e);
+        (window as any)._activeUtterance = null;
+      };
+
       // Match voice if available
       const voices = window.speechSynthesis.getVoices();
       if (voices && voices.length > 0) {
@@ -234,7 +244,7 @@ class SoundService {
         } catch (e) {
           console.warn('Speech synthesis speak error:', e);
         }
-      }, 25);
+      }, 35);
     } catch (e) {
       console.warn('Speech synthesis error:', e);
     }

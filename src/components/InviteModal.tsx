@@ -87,7 +87,7 @@ export const InviteModal: React.FC<InviteModalProps> = ({
               onClick={handleShare}
               className="w-full py-2.5 bg-gradient-to-r from-purple-600 to-pink-500 text-white font-bold rounded-2xl shadow-md tap-bounce text-xs flex items-center justify-center gap-1.5"
             >
-              <Share2 className="w-4 h-4" /> Share via WhatsApp / SMS
+              <Share2 className="w-4 h-4" /> Share with Friends
             </button>
           </div>
 

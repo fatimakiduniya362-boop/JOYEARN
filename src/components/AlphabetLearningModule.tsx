@@ -202,34 +202,36 @@ export const AlphabetLearningModule: React.FC<AlphabetLearningModuleProps> = ({
         </div>
       ) : (
         /* EXPLORER & DETAIL MODE */
-        <div className="space-y-4">
+        <div className="space-y-3.5">
           {/* Active Featured Letter Card */}
-          <div className="bg-gradient-to-br from-white via-rose-50/40 to-white rounded-3xl p-5 border border-rose-100 shadow-sm space-y-4">
-            <div className="flex items-start justify-between">
-              <div className="flex items-center gap-3">
-                <div className="w-18 h-18 rounded-3xl bg-gradient-to-br from-rose-500 to-pink-500 text-white flex flex-col items-center justify-center shadow-md">
+          <div className="bg-gradient-to-br from-white via-rose-50/50 to-white rounded-3xl p-4 sm:p-5 border border-rose-200/90 shadow-xs space-y-3.5 overflow-hidden">
+            <div className="flex items-start justify-between gap-2.5">
+              <div className="flex items-center gap-3 min-w-0 flex-1">
+                <div className="w-16 h-16 sm:w-18 sm:h-18 rounded-2xl bg-gradient-to-br from-rose-500 to-pink-500 text-white flex flex-col items-center justify-center shadow-md shrink-0">
                   <span className="text-2xl font-black leading-none">{selectedLetter.letter}</span>
-                  <span className="text-lg font-bold leading-none opacity-90">{selectedLetter.lower}</span>
+                  <span className="text-base font-bold leading-none opacity-90 mt-0.5">{selectedLetter.lower}</span>
                 </div>
-                <div>
-                  <div className="flex items-center gap-2">
-                    <h3 className="text-lg font-black text-slate-900">{selectedLetter.word}</h3>
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <h3 className="text-base sm:text-lg font-black text-slate-900 truncate">
+                      {selectedLetter.word}
+                    </h3>
                     {selectedLetter.urduWord && (
-                      <span className="text-xs text-rose-600 font-bold bg-rose-50 px-2 py-0.5 rounded-lg border border-rose-200">
+                      <span className="text-[11px] text-rose-700 font-extrabold bg-rose-100/80 px-2 py-0.5 rounded-lg border border-rose-200 shrink-0">
                         {selectedLetter.urduWord}
                       </span>
                     )}
                   </div>
-                  <p className="text-xs text-slate-500 font-semibold">{selectedLetter.phonics}</p>
-                  <p className="text-xs text-slate-600 italic mt-1">"{selectedLetter.sentence}"</p>
+                  <p className="text-xs text-rose-600 font-bold mt-0.5">{selectedLetter.phonics}</p>
+                  <p className="text-xs text-slate-600 italic mt-1 line-clamp-2">"{selectedLetter.sentence}"</p>
                 </div>
               </div>
 
-              <div className="flex flex-col items-end gap-1">
-                <span className="text-4xl">{selectedLetter.illustration}</span>
+              <div className="flex flex-col items-end gap-1.5 shrink-0">
+                <span className="text-3xl sm:text-4xl select-none">{selectedLetter.illustration}</span>
                 <button
                   onClick={() => speakText(`${selectedLetter.letter}. ${selectedLetter.word}. ${selectedLetter.sentence}`)}
-                  className="p-2 rounded-xl bg-rose-100 hover:bg-rose-200 text-rose-700 tap-bounce mt-1"
+                  className="p-2 rounded-xl bg-rose-100 hover:bg-rose-200 text-rose-700 tap-bounce border border-rose-200"
                   title="Listen to pronunciation"
                 >
                   <Volume2 className="w-4 h-4" />
@@ -237,24 +239,48 @@ export const AlphabetLearningModule: React.FC<AlphabetLearningModuleProps> = ({
               </div>
             </div>
 
-            {/* Educational Fun Fact */}
-            <div className="bg-white/80 p-3 rounded-2xl border border-rose-100 text-xs text-slate-600 flex items-start gap-2">
-              <span className="text-base shrink-0">💡</span>
-              <p className="leading-relaxed">
-                <strong className="text-slate-800">Did you know? </strong>
+            {/* AI-Generated Learning Explanation Card */}
+            <div className="bg-white/90 p-3.5 rounded-2xl border border-rose-200/80 shadow-2xs space-y-2">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-1.5 text-xs font-black text-rose-700">
+                  <Sparkles className="w-3.5 h-3.5 text-rose-500" />
+                  <span>AI Learning Hub Explanation</span>
+                </div>
+                <span className="text-[10px] font-bold bg-rose-100 text-rose-800 px-2 py-0.5 rounded-full">
+                  Phonics & Mnemonic
+                </span>
+              </div>
+              <p className="text-xs text-slate-700 leading-relaxed font-medium">
                 {selectedLetter.funFact}
               </p>
+              {selectedLetter.practiceTips && selectedLetter.practiceTips.length > 0 && (
+                <div className="pt-2 border-t border-rose-100 space-y-1">
+                  <span className="text-[10px] font-black uppercase tracking-wider text-slate-500 block">
+                    Handwriting & Pronunciation Steps:
+                  </span>
+                  <div className="flex flex-wrap gap-1.5">
+                    {selectedLetter.practiceTips.map((tip, idx) => (
+                      <span
+                        key={idx}
+                        className="text-[11px] bg-slate-50 text-slate-700 px-2 py-0.5 rounded-lg border border-slate-200"
+                      >
+                        {idx + 1}. {tip}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
           </div>
 
           {/* Complete 26-Letter Responsive Grid */}
-          <div className="bg-white rounded-3xl p-4 border border-rose-100 shadow-xs space-y-2">
+          <div className="bg-white rounded-3xl p-3.5 sm:p-4 border border-rose-100 shadow-xs space-y-2.5">
             <div className="flex items-center justify-between text-xs text-slate-500 font-bold px-1">
               <span>All 26 Letters (Tap to Learn & Hear)</span>
-              <span className="text-rose-600">{practicedLetters.size}/26 Practiced</span>
+              <span className="text-rose-600 font-black">{practicedLetters.size}/26 Practiced</span>
             </div>
 
-            <div className="grid grid-cols-6 sm:grid-cols-9 gap-1.5">
+            <div className="grid grid-cols-6 sm:grid-cols-9 gap-1 sm:gap-1.5">
               {ALPHABET_DATA.map((item) => {
                 const isSelected = selectedLetter.letter === item.letter;
                 const isPracticed = practicedLetters.has(item.letter);
@@ -263,16 +289,16 @@ export const AlphabetLearningModule: React.FC<AlphabetLearningModuleProps> = ({
                   <button
                     key={item.letter}
                     onClick={() => handleSelectLetter(item)}
-                    className={`p-2 rounded-2xl flex flex-col items-center justify-center transition-all tap-bounce relative ${
+                    className={`p-1.5 py-2 rounded-xl flex flex-col items-center justify-center transition-all tap-bounce relative select-none ${
                       isSelected
-                        ? 'bg-rose-500 text-white shadow-md scale-105'
+                        ? 'bg-rose-500 text-white shadow-md ring-2 ring-rose-400'
                         : isPracticed
-                        ? 'bg-rose-50/70 hover:bg-rose-100 text-slate-800 border border-rose-200/80'
-                        : 'bg-slate-50 hover:bg-slate-100 text-slate-600 border border-slate-200/60'
+                        ? 'bg-rose-50/80 hover:bg-rose-100 text-slate-800 border border-rose-200'
+                        : 'bg-slate-50 hover:bg-slate-100 text-slate-600 border border-slate-200/70'
                     }`}
                   >
-                    <span className="text-xs font-black">{item.letter}</span>
-                    <span className="text-[10px] opacity-80">{item.lower}</span>
+                    <span className="text-xs font-black leading-tight">{item.letter}</span>
+                    <span className="text-[10px] opacity-80 leading-tight">{item.lower}</span>
                     {isPracticed && !isSelected && (
                       <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-emerald-500" />
                     )}

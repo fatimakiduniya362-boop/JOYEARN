@@ -938,10 +938,7 @@ export const WalletPage: React.FC<WalletPageProps> = ({
             </div>
           </div>
 
-          {/* Simple Note */}
-          <div className="bg-slate-50 dark:bg-slate-850 border border-slate-200 dark:border-slate-800 rounded-2xl p-3 text-center text-xs font-medium text-slate-500 dark:text-slate-400">
-            Points ki koi fixed cash value nahi hai.
-          </div>
+
         </div>
       )}
 
@@ -1835,7 +1832,7 @@ export const WalletPage: React.FC<WalletPageProps> = ({
                     Points Summary:
                   </span>
                   <p className="text-[11px] text-slate-600 leading-relaxed">
-                    Points ki koi fixed cash value nahi hai.
+                    Rewards depend on ad revenue, are reviewed manually and are not guaranteed.
                   </p>
                 </div>
 

@@ -131,7 +131,7 @@ export const GoogleAuthModal: React.FC<GoogleAuthModalProps> = ({
         res.error ||
           (seniorMode
             ? 'ای میل بھیجنے میں مسئلہ پیش آیا۔ براہ کرم دوبارہ لاگ ان کریں۔'
-            : 'Could not send email. Please ensure Gmail permissions are active.')
+            : 'Could not send confirmation right now. Please try again later.')
       );
     }
   };
@@ -242,7 +242,7 @@ export const GoogleAuthModal: React.FC<GoogleAuthModalProps> = ({
                 {isSendingEmail ? (
                   <>
                     <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                    <span>{seniorMode ? 'ای میل بھیجی جا رہی ہے...' : 'Sending via Gmail...'}</span>
+                    <span>{seniorMode ? 'ای میل تصدیق ہو رہی ہے...' : 'Confirming account...'}</span>
                   </>
                 ) : (
                   <>
@@ -281,7 +281,7 @@ export const GoogleAuthModal: React.FC<GoogleAuthModalProps> = ({
                 </li>
                 <li className="flex items-center gap-2">
                   <span className="text-emerald-600 font-black">✓</span>
-                  <span>{seniorMode ? 'مفت تصدیقی ای میل رسید' : 'Official verification email via Gmail'}</span>
+                  <span>{seniorMode ? 'مفت تصدیقی ای میل رسید' : 'Official account verification'}</span>
                 </li>
                 <li className="flex items-center gap-2">
                   <span className="text-emerald-600 font-black">✓</span>
@@ -342,8 +342,8 @@ export const GoogleAuthModal: React.FC<GoogleAuthModalProps> = ({
               </h4>
               <p className="text-xs text-gray-600 leading-relaxed">
                 {seniorMode
-                  ? `کیا آپ چاہتے ہیں کہ JoyEarn آپ کے ای میل ایڈریس (${currentUser?.email}) پر اکاؤنٹ اور پوائنٹس سمری بھیجے؟`
-                  : `JoyEarn will send an official welcome confirmation and points summary to ${currentUser?.email} via Gmail.`}
+                  ? `کیا آپ چاہتے ہیں کہ JoyEarn آپ کے ای میل ایڈریس (${currentUser?.email}) پر اکاؤنٹ اور پوائنٹس سمری کی تصدیق ریکارڈ کرے؟`
+                  : `JoyEarn will generate an official welcome confirmation and points statement for ${currentUser?.email}.`}
               </p>
               <div className="flex gap-2 pt-1">
                 <button
@@ -356,7 +356,7 @@ export const GoogleAuthModal: React.FC<GoogleAuthModalProps> = ({
                   onClick={handleExecuteSendEmail}
                   className="flex-1 py-2.5 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-xl text-xs tap-bounce shadow-sm"
                 >
-                  {seniorMode ? 'ہاں، بھیجیں' : 'Confirm & Send'}
+                  {seniorMode ? 'ہاں، تصدیق کریں' : 'Confirm'}
                 </button>
               </div>
             </div>
@@ -367,7 +367,7 @@ export const GoogleAuthModal: React.FC<GoogleAuthModalProps> = ({
         <div className="text-[10px] text-gray-400 pt-1">
           {seniorMode
             ? 'سچی کمائی اور حفاظت کی ضمانت • کوئی پاس ورڈ محفوظ نہیں کیا جاتا'
-            : 'Zero password storage • Official Google Identity & Gmail security'}
+            : 'Zero password storage • Official Google Identity & Account Security'}
         </div>
       </div>
     </div>

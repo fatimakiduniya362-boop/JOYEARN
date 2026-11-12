@@ -36,6 +36,8 @@ interface LearnPageProps {
   onDailyQuizCompleted?: () => void;
   streakDays?: number;
   onBackToHome?: () => void;
+  initialSection?: 'alphabet' | 'numbers' | 'bioscience' | 'daily_quiz' | 'quizzes';
+  initialView?: 'browse' | 'daily_quiz' | 'lesson_quiz';
 }
 
 export const LearnPage: React.FC<LearnPageProps> = ({
@@ -47,14 +49,32 @@ export const LearnPage: React.FC<LearnPageProps> = ({
   onDailyQuizCompleted,
   streakDays = 5,
   onBackToHome,
+  initialSection,
+  initialView,
 }) => {
   const { light, success, warning, selection } = useHaptics();
 
   // Active view: 'browse' (main educational curriculum) | 'daily_quiz' | 'lesson_quiz'
-  const [activeView, setActiveView] = useState<'browse' | 'daily_quiz' | 'lesson_quiz'>('browse');
+  const [activeView, setActiveView] = useState<'browse' | 'daily_quiz' | 'lesson_quiz'>(
+    initialView || (initialSection === 'daily_quiz' ? 'daily_quiz' : 'browse')
+  );
 
   // Active curriculum section tab
-  const [curriculumSection, setCurriculumSection] = useState<'alphabet' | 'numbers' | 'bioscience' | 'daily_quiz' | 'quizzes'>('alphabet');
+  const [curriculumSection, setCurriculumSection] = useState<'alphabet' | 'numbers' | 'bioscience' | 'daily_quiz' | 'quizzes'>(
+    initialSection || 'alphabet'
+  );
+
+  useEffect(() => {
+    if (initialView) {
+      setActiveView(initialView);
+    }
+  }, [initialView]);
+
+  useEffect(() => {
+    if (initialSection) {
+      setCurriculumSection(initialSection);
+    }
+  }, [initialSection]);
 
   // Active single quiz state
   const [currentQuiz, setCurrentQuiz] = useState<QuizItem | null>(null);

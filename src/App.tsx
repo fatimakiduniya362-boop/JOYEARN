@@ -1126,7 +1126,7 @@ export default function App() {
       progressUrdu: `${activeReferralsCount}/${Math.max(referrals.length, 3)} دوست فعال`,
       progressPct: Math.round((activeReferralsCount / Math.max(referrals.length, 3)) * 100),
       isComplete: activeReferralsCount >= referrals.length,
-      keywords: ['invite', 'earn', 'referral', 'friend', 'bonus', 'share', 'code', 'whatsapp', 'sms', 'دعوت', 'دوست'],
+      keywords: ['invite', 'earn', 'referral', 'friend', 'bonus', 'share', 'code', 'sms', 'دعوت', 'دوست'],
     },
     {
       id: 'wallet' as const,

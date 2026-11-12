@@ -86,16 +86,7 @@ export const ShareStreakModal: React.FC<ShareStreakModalProps> = ({
     handleCopy();
   };
 
-  const shareViaWhatsApp = () => {
-    soundService.playClick();
-    light();
-    const url = `https://wa.me/?text=${encodeURIComponent(activeText)}`;
-    try {
-      window.open(url, '_blank', 'noopener,noreferrer');
-    } catch {
-      handleCopy();
-    }
-  };
+
 
   const shareViaTelegram = () => {
     soundService.playClick();
@@ -259,7 +250,7 @@ export const ShareStreakModal: React.FC<ShareStreakModalProps> = ({
             </button>
 
             {/* Quick Share to Social Apps */}
-            <div className="grid grid-cols-4 gap-2 pt-1">
+            <div className="grid grid-cols-3 gap-2 pt-1">
               <button
                 onClick={handleNativeShare}
                 className="py-2.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-900 border border-indigo-200 rounded-xl text-[11px] font-bold flex flex-col items-center justify-center gap-1 transition-colors"
@@ -267,15 +258,6 @@ export const ShareStreakModal: React.FC<ShareStreakModalProps> = ({
               >
                 <Share2 className="w-4 h-4 text-indigo-600" />
                 <span>Share</span>
-              </button>
-
-              <button
-                onClick={shareViaWhatsApp}
-                className="py-2.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-900 border border-emerald-200 rounded-xl text-[11px] font-bold flex flex-col items-center justify-center gap-1 transition-colors"
-                title="WhatsApp"
-              >
-                <MessageCircle className="w-4 h-4 text-emerald-600" />
-                <span>WhatsApp</span>
               </button>
 
               <button

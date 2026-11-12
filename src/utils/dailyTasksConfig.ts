@@ -29,6 +29,18 @@ export const DAILY_TASKS_GOAL_LINE =
  */
 export const MONTHLY_PRIZE_POOL_POINTS = 50000; // e.g., $50.00 USD pool
 
+/**
+ * Returns today's date in local calendar timezone (YYYY-MM-DD),
+ * ensuring midnight resets occur accurately in user's device timezone.
+ */
+export const getLocalCalendarDate = (): string => {
+  const d = new Date();
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
 export {
   OWNER_PERCENT,
   USERS_PERCENT,

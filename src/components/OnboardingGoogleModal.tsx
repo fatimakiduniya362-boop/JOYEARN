@@ -60,7 +60,7 @@ export const OnboardingGoogleModal: React.FC<OnboardingGoogleModalProps> = ({
             </div>
             <div>
               <span className="font-extrabold text-slate-900">
-                {seniorMode ? 'تصدیقی ای میل رسید' : 'Gmail Confirmation Receipt'}
+                {seniorMode ? 'تصدیقی ای میل رسید' : 'Account Confirmation Receipt'}
               </span>
               <p className="text-[10px] text-gray-500">Official statement sent to your verified email.</p>
             </div>

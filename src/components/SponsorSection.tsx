@@ -43,7 +43,7 @@ export const SponsorSection: React.FC<SponsorSectionProps> = ({
   // Buy Package / Contact Owner form state
   const [senderName, setSenderName] = useState('');
   const [businessName, setBusinessName] = useState('');
-  const [contactInfo, setContactInfo] = useState(''); // Email or WhatsApp
+  const [contactInfo, setContactInfo] = useState(''); // Email or contact address
   const [adTitle, setAdTitle] = useState('');
   const [adLink, setAdLink] = useState('');
   const [submitting, setSubmitting] = useState(false);
@@ -90,16 +90,7 @@ export const SponsorSection: React.FC<SponsorSectionProps> = ({
     setShowBuyModal(true);
   };
 
-  const handleOpenWhatsApp = (pkg?: SponsorPackage | null) => {
-    soundService.playClick();
-    const phone = appSettings.general.ownerWhatsApp?.replace(/[^0-9+]/g, '') || '923001234567';
-    const pkgName = pkg ? `${pkg.name} ($${pkg.priceUSD} USD)` : 'Sponsor Package';
-    const text = encodeURIComponent(
-      `Hello JoyEarn Owner! I would like to purchase the ${pkgName} on JoyEarn.\nPlease guide me through payment and banner activation.`
-    );
-    const waUrl = `https://wa.me/${phone.replace('+', '')}?text=${text}`;
-    window.open(waUrl, '_blank');
-  };
+
 
   const handleSubmitBuyRequest = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -148,7 +139,7 @@ export const SponsorSection: React.FC<SponsorSectionProps> = ({
       }, 2500);
     } catch (err) {
       console.warn('Error submitting sponsor request:', err);
-      setFormError('Failed to submit request. Please try again or contact via WhatsApp.');
+      setFormError('Failed to submit request. Please check your connection and try again.');
     } finally {
       setSubmitting(false);
     }
@@ -330,14 +321,6 @@ export const SponsorSection: React.FC<SponsorSectionProps> = ({
               Fixed pricing in US Dollars only with guaranteed user reach
             </p>
           </div>
-          <button
-            onClick={() => handleOpenWhatsApp()}
-            className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-black rounded-xl flex items-center gap-1.5 tap-bounce shadow-xs"
-            title="Chat directly on WhatsApp"
-          >
-            <MessageCircle className="w-3.5 h-3.5" />
-            <span>WhatsApp</span>
-          </button>
         </div>
 
         {/* Packages Cards */}
@@ -481,7 +464,7 @@ export const SponsorSection: React.FC<SponsorSectionProps> = ({
 
                 <div>
                   <label className="text-[11px] font-bold text-slate-300 block mb-1">
-                    Email or WhatsApp *
+                    Email or Contact Address *
                   </label>
                   <input
                     type="text"
