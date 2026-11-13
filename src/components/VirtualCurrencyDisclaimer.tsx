@@ -1,5 +1,4 @@
 import React from 'react';
-import { ShieldCheck, Sparkles } from 'lucide-react';
 
 interface VirtualCurrencyDisclaimerProps {
   className?: string;

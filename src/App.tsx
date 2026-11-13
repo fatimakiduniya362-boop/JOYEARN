@@ -1,47 +1,23 @@
 import { darkModeService } from './services/darkModeService';
 import { crashlytics } from './services/crashlytics';
 import { FirstTimeTutorialOverlay } from './components/FirstTimeTutorialOverlay';
-import { PromotedOffersSection } from './components/PromotedOffersSection';
 import React, { useState, useEffect, useRef } from 'react';
 import {
   Sparkles,
   Wallet,
   Play,
-  BookOpen,
-  Gamepad2,
-  CheckSquare,
-  Users,
-  Download,
-  TrendingUp,
-  Package,
-  Baby,
-  Flower2,
   Gift,
   Settings,
   ShieldCheck,
   ChevronRight,
-  Sun,
-  Flame,
-  Volume2,
-  Heart,
-  Eye,
-  Info,
-  Search,
-  X,
-  Filter,
   Bell,
-  Smartphone,
-  Globe,
-  Languages,
-  Share2,
   WifiOff,
-  Camera,
-  Video
+  Camera
 } from 'lucide-react';
 
-import { ThemeKey, VideoContent, QuizItem, SponsoredTask, WithdrawalRequest, TransactionRecord, ReferralUser } from './types';
+import { ThemeKey, VideoContent, QuizItem, SponsoredTask, TransactionRecord, ReferralUser } from './types';
 import { THEMES, INITIAL_VIDEOS, INITIAL_QUIZZES, INITIAL_TASKS, INITIAL_TRANSACTIONS, INITIAL_REFERRALS } from './data/mockData';
-import { getTodayUnlockedVideos, getTodayDayIndex } from './utils/dailyRotation';
+import { getTodayUnlockedVideos } from './utils/dailyRotation';
 import { ALL_QUIZZES } from './data/quizDatabase';
 import { WATCH_PAGE_VIDEOS } from './data/watchVideosData';
 import { DailyTasksCard } from './components/DailyTasksCard';
@@ -56,31 +32,26 @@ import { WalletPage, DAILY_MAX_POINTS } from './components/WalletPage';
 import { WatchPage } from './components/WatchPage';
 import { LearnPage } from './components/LearnPage';
 import { TasksPage } from './components/TasksPage';
-import { VideoThumbnail } from './components/VideoThumbnail';
 import { InviteModal } from './components/InviteModal';
 import { OfflineModal } from './components/OfflineModal';
 import { DailyChestModal } from './components/DailyChestModal';
 import { ThemeSelectorModal } from './components/ThemeSelectorModal';
 import { NotificationManager } from './components/NotificationManager';
-import { AchievementsSection } from './components/AchievementsSection';
 import { AndroidBottomNav } from './components/AndroidBottomNav';
 import { usePWAInstall } from './hooks/usePWAInstall';
 import { AppUser } from './types';
 import { LuckyWheelModal } from './components/LuckyWheelModal';
 import { GoogleAuthModal } from './components/GoogleAuthModal';
-import { TopEarnersSection } from './components/TopEarnersSection';
 import { SettingsModal } from './components/SettingsModal';
 import { PrivacyPolicyModal } from './components/PrivacyPolicyModal';
 import { AppRateModal } from './components/AppRateModal';
 import { FirstOpenAuthScreen } from './components/FirstOpenAuthScreen';
 import { ConfettiEffect } from './components/ConfettiEffect';
-import { ActivityGoals } from './components/ActivityGoals';
 import { PersonalDashboardModal } from './components/PersonalDashboardModal';
 import { StreakLeaderboardModal } from './components/StreakLeaderboardModal';
 import { AdminWithdrawalModal, ADMIN_EMAIL } from './components/AdminWithdrawalModal';
 import { SponsorSection } from './components/SponsorSection';
 import { appSettingsService, FullAppSettings } from './services/appSettingsService';
-import { DailyGoalsWidget } from './components/DailyGoalsWidget';
 import { DailyGoalsCalendarModal } from './components/DailyGoalsCalendarModal';
 import { SponsorAdvertiseModal } from './components/SponsorAdvertiseModal';
 import { syncUserDataToCloud, loadUserDataFromCloud, deleteUserDataFromFirestore, recordTaskCompletionInFirestore } from './services/firestoreService';
@@ -88,7 +59,6 @@ import { LiveStreamModal } from './components/LiveStreamModal';
 import { CommunityChatModal } from './components/CommunityChatModal';
 import { ShopMarketModal } from './components/ShopMarketModal';
 import { CreatorAgencyModal } from './components/CreatorAgencyModal';
-import { VlogShortsModal } from './components/VlogShortsModal';
 import { VlogsSection } from './components/VlogsSection';
 import { submitVlog } from './services/vlogService';
 import { AdMobInterstitialModal } from './components/AdMobInterstitialModal';

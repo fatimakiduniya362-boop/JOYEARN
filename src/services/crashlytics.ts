@@ -115,7 +115,7 @@ class FirebaseCrashlyticsService {
   ) {
     const errObj = typeof error === 'string' ? new Error(error) : error;
     const report: CrashReport = {
-      id: `crash-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`,
+      id: `crash-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`,
       timestamp: new Date().toISOString(),
       type: context?.type || 'non-fatal',
       message: errObj.message || 'Unknown Error',

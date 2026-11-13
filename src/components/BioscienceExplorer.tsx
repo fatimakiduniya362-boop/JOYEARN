@@ -1,5 +1,4 @@
 import React, { useState } from 'react';
-import { Dna, Sparkles, Activity, Layers, ExternalLink, ArrowRight, Play, CheckCircle2 } from 'lucide-react';
 import { BIOSCIENCE_MOLECULES, BiologicalMolecule, transcribeDnaToRna, translateRnaToPeptide, CodonMapping } from '../data/bioscienceDatabase';
 import { soundService } from '../services/soundService';
 import { useHaptics } from '../hooks/useHaptics';
