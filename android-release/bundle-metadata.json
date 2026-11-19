@@ -1,7 +1,7 @@
 {
   "packageId": "com.joyearn.rewards.learning",
-  "versionName": "1.2.0",
-  "versionCode": 2,
+  "versionName": "1.2.1",
+  "versionCode": 3,
   "targetSdkVersion": 34,
   "minSdkVersion": 21,
   "obfuscation": "ProGuard/R8",

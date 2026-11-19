@@ -23,13 +23,14 @@ interface ShopMarketModalProps {
 export const ShopMarketModal: React.FC<ShopMarketModalProps> = ({
   isOpen,
   onClose,
-  userPoints = 1250,
+  userPoints = 0,
   onPurchaseItem,
   seniorMode = false
 }) => {
   const [activeCategory, setActiveCategory] = useState<'boosts' | 'avatars' | 'badges'>('boosts');
   const [purchasedIds, setPurchasedIds] = useState<string[]>([]);
-  const { light, success } = useHaptics();
+  const [shopNotice, setShopNotice] = useState<string | null>(null);
+  const { success } = useHaptics();
 
   if (!isOpen) return null;
 
@@ -45,14 +46,14 @@ export const ShopMarketModal: React.FC<ShopMarketModalProps> = ({
     if (purchasedIds.includes(item.id)) return;
     if (userPoints < item.cost) {
       soundService.playWrong();
-      try {
-        alert(`You need ${item.cost} JoyPoints to purchase this item!`);
-      } catch {}
+      setShopNotice(`You need ${item.cost} JoyPoints to purchase ${item.name}!`);
+      setTimeout(() => setShopNotice(null), 3500);
       return;
     }
     soundService.playCoin();
     success();
     setPurchasedIds((prev) => [...prev, item.id]);
+    setShopNotice(null);
     if (onPurchaseItem) onPurchaseItem(item.cost, item.name);
   };
 
@@ -113,6 +114,14 @@ export const ShopMarketModal: React.FC<ShopMarketModalProps> = ({
 
         {/* Item List */}
         <div className="p-4 overflow-y-auto space-y-3 flex-1">
+          {shopNotice && (
+            <div className="p-2.5 bg-amber-50 border border-amber-300 text-amber-900 rounded-2xl text-xs font-bold flex items-center justify-between gap-2">
+              <span>{shopNotice}</span>
+              <button type="button" onClick={() => setShopNotice(null)} className="font-black text-amber-700">
+                ✕
+              </button>
+            </div>
+          )}
           {catalog
             .filter((item) => item.category === activeCategory)
             .map((item) => {

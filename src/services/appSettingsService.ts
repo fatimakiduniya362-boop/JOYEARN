@@ -72,7 +72,7 @@ export const DEFAULT_APP_SETTINGS: FullAppSettings = {
     appLogo: '🌟',
     welcomeMessage: 'Learn, practice daily skills, and earn virtual JoyPoints!',
     themeColor: 'rose',
-    ownerEmail: 'fatimakiduniya362@gmail.com',
+    ownerEmail: 'romeelajutt23@gmail.com',
     ownerWhatsApp: '+923001234567',
   },
   points: {
@@ -84,7 +84,7 @@ export const DEFAULT_APP_SETTINGS: FullAppSettings = {
     ludoWinPoints: 100,
     vlogPublishPoints: 100,
     dailyMaxPointsCeiling: 2500,
-    pointsPerDollar: 1000,
+    pointsPerDollar: 8000,
   },
   wallet: {
     minWithdrawUSD: 100,
@@ -156,10 +156,17 @@ class AppSettingsService {
       const saved = localStorage.getItem(LOCAL_STORAGE_SETTINGS_KEY);
       if (saved) {
         const parsed = JSON.parse(saved);
+        const migratedGeneral = {
+          ...DEFAULT_APP_SETTINGS.general,
+          ...(parsed.general || {}),
+        };
+        if (migratedGeneral.ownerEmail?.trim().toLowerCase() === 'fatimakiduniya362@gmail.com') {
+          migratedGeneral.ownerEmail = 'romeelajutt23@gmail.com';
+        }
         this.currentSettings = {
           ...DEFAULT_APP_SETTINGS,
           ...parsed,
-          general: { ...DEFAULT_APP_SETTINGS.general, ...(parsed.general || {}) },
+          general: migratedGeneral,
           points: { ...DEFAULT_APP_SETTINGS.points, ...(parsed.points || {}) },
           wallet: {
             ...DEFAULT_APP_SETTINGS.wallet,

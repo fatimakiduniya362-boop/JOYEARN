@@ -3,6 +3,8 @@ import {
   isDailyQuizCompletedToday,
   markDailyQuizCompletedToday,
   getTimeUntilMidnight,
+  normalizeQuizDifficulty,
+  getCorrectOptionIndex,
   ShuffledQuizItem
 } from '../services/dailyQuizService';
 import { adMobManager } from '../services/adMobService';
@@ -145,6 +147,7 @@ export const LearnModal: React.FC<LearnModalProps> = ({
   const [isDailyAnswered, setIsDailyAnswered] = useState(false);
   const [dailyScore, setDailyScore] = useState(0);
   const [isDailyLocked, setIsDailyLocked] = useState(() => isDailyQuizCompletedToday());
+  const [hasDoubledDailyPoints, setHasDoubledDailyPoints] = useState(false);
   const [timeUntilMidnight, setTimeUntilMidnight] = useState(() => getTimeUntilMidnight().formatted);
 
   // AdMob Fullscreen State
@@ -223,26 +226,18 @@ export const LearnModal: React.FC<LearnModalProps> = ({
 
   const [timeLeft, setTimeLeft] = useState<number>(totalDuration);
 
-  // Quiz count breakdown per difficulty
+  // Quiz count breakdown per difficulty (supports both Beginner/Intermediate/Advanced and easy/medium/hard)
   const difficultyCounts = useMemo(() => {
     return {
-      Beginner: quizzes.filter(
-        (q) => (q.difficulty || 'Beginner').toLowerCase() === 'beginner'
-      ).length,
-      Intermediate: quizzes.filter(
-        (q) => (q.difficulty || 'Beginner').toLowerCase() === 'intermediate'
-      ).length,
-      Advanced: quizzes.filter(
-        (q) => (q.difficulty || 'Beginner').toLowerCase() === 'advanced'
-      ).length,
+      Beginner: quizzes.filter((q) => normalizeQuizDifficulty(q.difficulty) === 'Beginner').length,
+      Intermediate: quizzes.filter((q) => normalizeQuizDifficulty(q.difficulty) === 'Intermediate').length,
+      Advanced: quizzes.filter((q) => normalizeQuizDifficulty(q.difficulty) === 'Advanced').length,
     };
   }, [quizzes]);
 
   // Filter quizzes by selected difficulty and optional category
   const activeQuizzes = useMemo(() => {
-    let list = quizzes.filter(
-      (q) => (q.difficulty || 'Beginner').toLowerCase() === selectedDifficulty.toLowerCase()
-    );
+    let list = quizzes.filter((q) => normalizeQuizDifficulty(q.difficulty) === selectedDifficulty);
     if (selectedCategory !== 'All') {
       const filtered = list.filter((q) => q.category === selectedCategory);
       if (filtered.length > 0) list = filtered;
@@ -266,9 +261,9 @@ export const LearnModal: React.FC<LearnModalProps> = ({
     setAwardedBonus(0);
   }, [currentIndex, selectedDifficulty, selectedCategory, totalDuration]);
 
-  // Active countdown timer interval
+  // Active countdown timer interval (only ticks when Practice Quiz is actively visible)
   useEffect(() => {
-    if (isAnswered) return;
+    if (isAnswered || activeLearnTab !== 'quiz' || quizSubTab !== 'practice') return;
 
     const timer = setInterval(() => {
       setTimeLeft((prev) => {
@@ -288,7 +283,7 @@ export const LearnModal: React.FC<LearnModalProps> = ({
     }, 1000);
 
     return () => clearInterval(timer);
-  }, [isAnswered, currentIndex, selectedDifficulty, selectedCategory]);
+  }, [isAnswered, activeLearnTab, quizSubTab, currentIndex, selectedDifficulty, selectedCategory]);
 
   const handleSelectDifficulty = (diff: DifficultyLevel) => {
     if (diff === selectedDifficulty) return;
@@ -307,7 +302,7 @@ export const LearnModal: React.FC<LearnModalProps> = ({
     setSelectedOption(idx);
     setIsAnswered(true);
 
-    const isCorrect = idx === currentQuiz.correctIndex;
+    const isCorrect = idx === getCorrectOptionIndex(currentQuiz);
     if (isCorrect) {
       // Calculate speed bonus based on percentage of time remaining
       const pct = timeLeft / totalDuration;
@@ -363,7 +358,7 @@ export const LearnModal: React.FC<LearnModalProps> = ({
     const currentDailyQ = dailyQuizzes[dailyIndex];
     if (!currentDailyQ) return;
 
-    const correct = currentDailyQ.correctAnswer;
+    const correct = getCorrectOptionIndex(currentDailyQ);
     const isCorrect = idx === correct;
 
     if (isCorrect) {
@@ -385,16 +380,16 @@ export const LearnModal: React.FC<LearnModalProps> = ({
       setDailySelectedOption(null);
       setIsDailyAnswered(false);
     } else {
-      // 5/5 Questions Completed - Lock for Today!
+      // 5/5 Questions Completed - Lock for Today! (dailyScore already includes Q5 if answered right)
       soundService.playFanfare();
-      const finalScore = dailyScore + (dailySelectedOption === dailyQuizzes[4]?.correctAnswer ? 1 : 0);
+      const finalScore = dailyScore;
       markDailyQuizCompletedToday(finalScore);
       setIsDailyLocked(true);
       setShowFireCelebration(true);
       onDailyQuizCompleted?.();
 
       // Perfect score bonus
-      if (finalScore === 5) {
+      if (finalScore >= 5) {
         onEarnPoints(50, 'Perfect 5/5 Daily Quiz Bonus 🎉');
       }
 
@@ -554,7 +549,7 @@ export const LearnModal: React.FC<LearnModalProps> = ({
                     </div>
 
                     {/* Rewarded Video Bonus Option (AdMob) - Visible only when ADS_ENABLED is true */}
-                    {adMobManager.getConfig().adsEnabled && (
+                    {adMobManager.getConfig().adsEnabled && !hasDoubledDailyPoints && (
                       <button
                         type="button"
                         onClick={() => setShowRewarded(true)}
@@ -638,7 +633,7 @@ export const LearnModal: React.FC<LearnModalProps> = ({
                         <div className="space-y-2 pt-1">
                           {dailyQuizzes[dailyIndex].options.map((opt, oIdx) => {
                             const isChosen = dailySelectedOption === oIdx;
-                            const isCorrectOpt = oIdx === dailyQuizzes[dailyIndex].correctAnswer;
+                            const isCorrectOpt = oIdx === getCorrectOptionIndex(dailyQuizzes[dailyIndex]);
                             const isEliminated = eliminatedOptionIndex === oIdx;
 
                             let optStyle = 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 hover:border-indigo-400 text-slate-800 dark:text-slate-100';
@@ -803,6 +798,11 @@ export const LearnModal: React.FC<LearnModalProps> = ({
             { id: 'Science', label: 'Science', emoji: '🔬' },
             { id: 'Math', label: 'Math', emoji: '🔢' },
             { id: 'History', label: 'History', emoji: '🏛️' },
+            { id: 'Technology', label: 'Technology', emoji: '💻' },
+            { id: 'Language', label: 'Language', emoji: '📝' },
+            { id: 'Nature', label: 'Nature', emoji: '🌿' },
+            { id: 'Sports', label: 'Sports', emoji: '⚽' },
+            { id: 'Fun Facts', label: 'Fun Facts', emoji: '✨' },
             { id: 'General Knowledge', label: 'General', emoji: '💡' },
           ].map((cat) => {
             const isCatSelected = selectedCategory === cat.id;
@@ -965,7 +965,7 @@ export const LearnModal: React.FC<LearnModalProps> = ({
             {currentQuiz.options.map((opt, idx) => {
               const letter = ['A', 'B', 'C', 'D'][idx] || `${idx + 1}`;
               const isSelected = selectedOption === idx;
-              const isCorrect = idx === currentQuiz.correctIndex;
+              const isCorrect = idx === getCorrectOptionIndex(currentQuiz);
 
               let btnClass = 'bg-white border-2 border-gray-200 text-gray-800 hover:border-indigo-300';
               let letterBadge = 'bg-indigo-50 border-indigo-200 text-indigo-700';
@@ -1010,7 +1010,7 @@ export const LearnModal: React.FC<LearnModalProps> = ({
           {isAnswered && (
             <div className="p-4 bg-gradient-to-br from-blue-50 to-indigo-50 border-2 border-blue-200 rounded-3xl space-y-2.5 text-xs animate-bounce-subtle">
               {/* Correct Bonus Banner */}
-              {selectedOption === currentQuiz.correctIndex && (
+              {selectedOption === getCorrectOptionIndex(currentQuiz) && (
                 <div className="bg-gradient-to-r from-emerald-600 via-teal-600 to-emerald-700 text-white rounded-2xl p-3 shadow-md space-y-1.5">
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2">
@@ -1327,7 +1327,10 @@ export const LearnModal: React.FC<LearnModalProps> = ({
       <AdMobRewardedModal
         isOpen={showRewarded}
         onClose={() => setShowRewarded(false)}
-        onRewardEarned={(bonus) => onEarnPoints(bonus, 'Watched Sponsored Video: Doubled Quiz Points 🪙')}
+        onRewardEarned={(bonus) => {
+          setHasDoubledDailyPoints(true);
+          onEarnPoints(bonus, 'Watched Sponsored Video: Doubled Quiz Points 🪙');
+        }}
         baseRewardPoints={50}
         seniorMode={seniorMode}
       />
@@ -1344,9 +1347,10 @@ export const LearnModal: React.FC<LearnModalProps> = ({
           } catch {}
           const currentQ = dailyQuizzes[dailyIndex];
           if (currentQ) {
+            const correctIdx = getCorrectOptionIndex(currentQ);
             const wrongIndices = currentQ.options
               .map((_, idx) => idx)
-              .filter((idx) => idx !== currentQ.correctAnswer);
+              .filter((idx) => idx !== correctIdx);
             if (wrongIndices.length > 0) {
               setEliminatedOptionIndex(wrongIndices[0]);
             }

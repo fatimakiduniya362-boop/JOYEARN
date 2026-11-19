@@ -34,6 +34,7 @@ import { WeeklyStreakSummary } from './WeeklyStreakSummary';
 import { DailyMilestoneSection } from './DailyMilestoneSection';
 import { StreakLeaderboardModal } from './StreakLeaderboardModal';
 import { Share2 } from 'lucide-react';
+import { getUserAchievements } from '../services/dailyMissionsService';
 
 interface HistoryItem {
   id: string;
@@ -50,6 +51,7 @@ interface PersonalDashboardModalProps {
   userName: string;
   userAvatar: string;
   userEmail?: string;
+  userUid?: string;
   seniorMode: boolean;
   completedActivitiesCount: number; // 0 to 5
   streakDays: number;
@@ -71,6 +73,7 @@ export const PersonalDashboardModal: React.FC<PersonalDashboardModalProps> = ({
   userName,
   userAvatar,
   userEmail,
+  userUid,
   seniorMode,
   completedActivitiesCount,
   streakDays,
@@ -998,6 +1001,35 @@ export const PersonalDashboardModal: React.FC<PersonalDashboardModalProps> = ({
               )}
             </div>
           )}
+
+          {/* Compact Real Achievements Strip (Cosmetic Only — Zero Fake Earnings) */}
+          <div className="mt-4 pt-3 border-t border-pink-100 space-y-2">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-black text-slate-800 flex items-center gap-1.5">
+                <Award className="w-3.5 h-3.5 text-rose-500" />
+                Achievements
+              </span>
+              <span className="text-[10px] font-bold text-slate-400">
+                Real completed milestones
+              </span>
+            </div>
+            <div className="flex flex-wrap gap-1.5">
+              {getUserAchievements(userUid || 'local', streakDays).map((badge) => (
+                <span
+                  key={badge.id}
+                  title={badge.description}
+                  className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10.5px] font-bold border ${
+                    badge.unlocked
+                      ? 'bg-rose-50 border-rose-200 text-rose-700'
+                      : 'bg-slate-50 border-slate-200 text-slate-400 opacity-70'
+                  }`}
+                >
+                  <span>{badge.emoji}</span>
+                  <span>{badge.title}</span>
+                </span>
+              ))}
+            </div>
+          </div>
         </div>
 
         {/* Footer */}

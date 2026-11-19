@@ -9,12 +9,35 @@
 
 import { hapticService } from './haptics';
 
+export interface VoicePlaybackState {
+  status: 'idle' | 'playing' | 'paused';
+  text: string;
+  title: string;
+  lang: string;
+  sessionId: number;
+}
+
+// Tiny silent WAV data URI used to hold Android audio focus / MediaSession when app is minimized
+const SILENT_AUDIO_DATA_URI =
+  'data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA';
+
 class SoundService {
   private ctx: AudioContext | null = null;
   private isMuted: boolean = false; // Sounds ON by default
   private volume: number = 0.85; // Clear default volume
   private isUnlocked: boolean = false;
   private muteListeners: Set<(muted: boolean) => void> = new Set();
+  private voiceListeners: Set<(state: VoicePlaybackState) => void> = new Set();
+  private voiceState: VoicePlaybackState = {
+    status: 'idle',
+    text: '',
+    title: '',
+    lang: 'en-US',
+    sessionId: 0,
+  };
+  private voiceSessionCounter: number = 0;
+  private keepAliveAudio: HTMLAudioElement | null = null;
+  private resumeOnVisible: boolean = false;
 
   constructor() {
     if (typeof window !== 'undefined') {
@@ -32,7 +55,115 @@ class SoundService {
         }
       }
       this.setupFirstTapUnlock();
+      this.setupVisibilityAndMediaSession();
     }
+  }
+
+  private setupVisibilityAndMediaSession() {
+    if (typeof window === 'undefined' || typeof document === 'undefined') return;
+
+    // Restore playback state cleanly when returning to the app on Android/mobile browsers
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') {
+        if (this.ctx && this.ctx.state === 'suspended') {
+          this.ctx.resume().catch(() => {});
+        }
+        if (this.voiceState.status === 'playing' && 'speechSynthesis' in window) {
+          try {
+            if (window.speechSynthesis.paused) {
+              window.speechSynthesis.resume();
+            } else if (!window.speechSynthesis.speaking && this.resumeOnVisible && this.voiceState.text) {
+              this.resumeOnVisible = false;
+              this.playVoice(this.voiceState.text, this.voiceState.title, this.voiceState.lang, false);
+            }
+          } catch {}
+        }
+      } else if (document.visibilityState === 'hidden') {
+        if (this.voiceState.status === 'playing') {
+          this.resumeOnVisible = true;
+        }
+      }
+    });
+
+    if ('mediaSession' in navigator) {
+      try {
+        navigator.mediaSession.setActionHandler('play', () => this.resumeVoice());
+        navigator.mediaSession.setActionHandler('pause', () => this.pauseVoice());
+        navigator.mediaSession.setActionHandler('stop', () => this.stopVoice());
+      } catch {
+        // Not all browsers support every action handler
+      }
+    }
+  }
+
+  private startBackgroundKeepAlive(title: string) {
+    if (typeof window === 'undefined') return;
+    try {
+      if (!this.keepAliveAudio) {
+        const audio = new Audio(SILENT_AUDIO_DATA_URI);
+        audio.loop = true;
+        audio.volume = 0.001;
+        this.keepAliveAudio = audio;
+      }
+      void this.keepAliveAudio.play().catch(() => {});
+    } catch {}
+
+    if ('mediaSession' in navigator) {
+      try {
+        navigator.mediaSession.metadata = new MediaMetadata({
+          title: title || 'VibeLoom Voice',
+          artist: 'VibeLoom Learning',
+          album: 'VibeLoom Audio',
+        });
+        navigator.mediaSession.playbackState = 'playing';
+      } catch {}
+    }
+  }
+
+  private pauseBackgroundKeepAlive() {
+    try {
+      this.keepAliveAudio?.pause();
+    } catch {}
+    if (typeof navigator !== 'undefined' && 'mediaSession' in navigator) {
+      try {
+        navigator.mediaSession.playbackState = 'paused';
+      } catch {}
+    }
+  }
+
+  private stopBackgroundKeepAlive() {
+    try {
+      if (this.keepAliveAudio) {
+        this.keepAliveAudio.pause();
+        this.keepAliveAudio.currentTime = 0;
+      }
+    } catch {}
+    if (typeof navigator !== 'undefined' && 'mediaSession' in navigator) {
+      try {
+        navigator.mediaSession.playbackState = 'none';
+      } catch {}
+    }
+  }
+
+  private emitVoiceState() {
+    const snapshot: VoicePlaybackState = { ...this.voiceState };
+    this.voiceListeners.forEach((listener) => {
+      try {
+        listener(snapshot);
+      } catch {}
+    });
+  }
+
+  public getVoiceState(): VoicePlaybackState {
+    return { ...this.voiceState };
+  }
+
+  public subscribeVoiceState(listener: (state: VoicePlaybackState) => void): () => void {
+    this.voiceListeners.add(listener);
+    listener({ ...this.voiceState });
+    return () => {
+      this.voiceListeners.delete(listener);
+    };
   }
 
   private setupFirstTapUnlock() {
@@ -97,8 +228,8 @@ class SoundService {
     this.isMuted = muted;
     if (typeof window !== 'undefined') {
       localStorage.setItem('joyearn_sound_muted', String(muted));
-      if (muted && 'speechSynthesis' in window) {
-        window.speechSynthesis.cancel();
+      if (muted) {
+        this.stopVoice();
       }
     }
     this.muteListeners.forEach((listener) => {
@@ -185,16 +316,22 @@ class SoundService {
   }
 
   /**
-   * Speaks phonics/word/letter text aloud using browser speech synthesis,
-   * preceded by an immediate chime tone so feedback is immediate and loud.
+   * Persistent cross-screen voice playback with duplicate-audio prevention,
+   * Media Session API integration, and real Play/Pause/Resume/Stop controls.
    */
-  public speakPhonics(text: string, lang: string = 'en-US') {
-    if (this.isMuted || this.volume <= 0) return;
+  public playVoice(
+    text: string,
+    title?: string,
+    lang: string = 'en-US',
+    withChime: boolean = true
+  ) {
+    const cleanText = (text || '').trim();
+    if (!cleanText || this.isMuted || this.volume <= 0) return;
 
-    // 1. Play immediate musical tone for the letter
-    this.playLetterChime(text.charAt(0) || 'A');
+    if (withChime) {
+      this.playLetterChime(cleanText.charAt(0) || 'A');
+    }
 
-    // 2. Speak via window.speechSynthesis
     if (typeof window === 'undefined' || !('speechSynthesis' in window)) {
       return;
     }
@@ -202,29 +339,58 @@ class SoundService {
     try {
       this.unlockAudio();
 
-      if (window.speechSynthesis.paused) {
-        window.speechSynthesis.resume();
-      }
-
+      // Prevent duplicate playback: bump session token and cancel any active speech
+      const sessionId = ++this.voiceSessionCounter;
       window.speechSynthesis.cancel();
 
-      const utterance = new SpeechSynthesisUtterance(text);
+      const label = (title || cleanText).slice(0, 60);
+      this.voiceState = {
+        status: 'playing',
+        text: cleanText,
+        title: label,
+        lang,
+        sessionId,
+      };
+      this.resumeOnVisible = false;
+      this.startBackgroundKeepAlive(label);
+      this.emitVoiceState();
+
+      const utterance = new SpeechSynthesisUtterance(cleanText);
       utterance.lang = lang;
-      utterance.rate = 0.88; // gentle, clear phonics speed
-      utterance.pitch = 1.05; // warm, encouraging tone
+      utterance.rate = 0.9;
+      utterance.pitch = 1.03;
       utterance.volume = Math.max(0.2, Math.min(1.0, this.volume));
 
-      // Prevent Android Chromium garbage collection bug from terminating speech prematurely
+      // Keep strong reference to prevent Android Chromium GC interruption
       (window as any)._activeUtterance = utterance;
+
       utterance.onend = () => {
+        if (this.voiceSessionCounter !== sessionId) return;
         (window as any)._activeUtterance = null;
-      };
-      utterance.onerror = (e) => {
-        console.warn('Speech synthesis utterance notice:', e);
-        (window as any)._activeUtterance = null;
+        this.resumeOnVisible = false;
+        this.stopBackgroundKeepAlive();
+        this.voiceState = {
+          ...this.voiceState,
+          status: 'idle',
+        };
+        this.emitVoiceState();
       };
 
-      // Match voice if available
+      utterance.onerror = (e) => {
+        if (this.voiceSessionCounter !== sessionId) return;
+        // 'interrupted' / 'canceled' happen naturally when switching utterances or stopping
+        if (e.error !== 'interrupted' && e.error !== 'canceled') {
+          console.warn('Speech synthesis utterance notice:', e.error);
+        }
+        (window as any)._activeUtterance = null;
+        this.stopBackgroundKeepAlive();
+        this.voiceState = {
+          ...this.voiceState,
+          status: 'idle',
+        };
+        this.emitVoiceState();
+      };
+
       const voices = window.speechSynthesis.getVoices();
       if (voices && voices.length > 0) {
         const preferredVoice = voices.find(
@@ -236,6 +402,7 @@ class SoundService {
       }
 
       setTimeout(() => {
+        if (this.voiceSessionCounter !== sessionId) return;
         try {
           if (window.speechSynthesis.paused) {
             window.speechSynthesis.resume();
@@ -244,10 +411,68 @@ class SoundService {
         } catch (e) {
           console.warn('Speech synthesis speak error:', e);
         }
-      }, 35);
+      }, 30);
     } catch (e) {
       console.warn('Speech synthesis error:', e);
     }
+  }
+
+  public pauseVoice() {
+    if (this.voiceState.status !== 'playing') return;
+    if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+      try {
+        window.speechSynthesis.pause();
+      } catch {}
+    }
+    this.resumeOnVisible = false;
+    this.pauseBackgroundKeepAlive();
+    this.voiceState = { ...this.voiceState, status: 'paused' };
+    this.emitVoiceState();
+  }
+
+  public resumeVoice() {
+    if (this.voiceState.status !== 'paused' || !this.voiceState.text) return;
+    this.unlockAudio();
+    if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+      try {
+        if (window.speechSynthesis.paused) {
+          window.speechSynthesis.resume();
+          this.startBackgroundKeepAlive(this.voiceState.title);
+          this.voiceState = { ...this.voiceState, status: 'playing' };
+          this.emitVoiceState();
+          return;
+        }
+      } catch {}
+    }
+    // Android Chromium WebViews sometimes drop paused utterances; cleanly replay from current text
+    this.playVoice(this.voiceState.text, this.voiceState.title, this.voiceState.lang, false);
+  }
+
+  public stopVoice() {
+    this.voiceSessionCounter++;
+    this.resumeOnVisible = false;
+    if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+      try {
+        window.speechSynthesis.cancel();
+      } catch {}
+      (window as any)._activeUtterance = null;
+    }
+    this.stopBackgroundKeepAlive();
+    this.voiceState = {
+      status: 'idle',
+      text: '',
+      title: '',
+      lang: 'en-US',
+      sessionId: this.voiceSessionCounter,
+    };
+    this.emitVoiceState();
+  }
+
+  /**
+   * Speaks phonics/word/letter text aloud using the persistent cross-screen voice engine.
+   */
+  public speakPhonics(text: string, lang: string = 'en-US') {
+    this.playVoice(text, text, lang, true);
   }
 
   /**

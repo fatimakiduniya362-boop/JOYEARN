@@ -1,0 +1,9 @@
+# Copy this file to local.properties (do NOT commit secrets) and fill in your real AdMob IDs
+# before building a Play Store release AAB (./gradlew bundleRelease).
+# Debug builds automatically use Google's official test IDs.
+
+ADMOB_APP_ID=ca-app-pub-XXXXXXXXXXXXXXXX~YYYYYYYYYY
+ADMOB_BANNER_UNIT_ID=ca-app-pub-XXXXXXXXXXXXXXXX/1111111111
+ADMOB_INTERSTITIAL_UNIT_ID=ca-app-pub-XXXXXXXXXXXXXXXX/2222222222
+ADMOB_REWARDED_UNIT_ID=ca-app-pub-XXXXXXXXXXXXXXXX/3333333333
+ADMOB_NATIVE_UNIT_ID=ca-app-pub-XXXXXXXXXXXXXXXX/4444444444

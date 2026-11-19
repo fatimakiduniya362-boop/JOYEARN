@@ -6,3 +6,9 @@ coverage/
 *.log
 .env*
 !.env.example
+*.pem
+*.key
+*.jks
+*.keystore
+*service-account*.json
+.firebase/

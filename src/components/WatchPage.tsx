@@ -1,805 +1,1590 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import {
   Play,
-  ArrowLeft,
-  CheckCircle,
-  Sparkles,
-  RefreshCw,
-  Loader2,
-  ShieldCheck,
+  Pause,
   Search,
-  Palette,
-  BookOpen,
-  Smile,
-  ListPlus,
+  Bell,
+  MoreVertical,
+  ArrowLeft,
+  Volume2,
+  VolumeX,
+  Maximize,
+  Bookmark,
+  BookmarkCheck,
+  Share2,
   Flag,
-  ExternalLink,
-  Flame,
+  Heart,
+  X,
+  CheckCircle2,
+  Loader2,
+  RefreshCw,
+  User,
+  Sparkles,
   Film,
-  Compass,
-  Utensils,
-  Leaf,
-  Atom,
-  Check
+  Video as VideoIcon,
+  Camera,
+  Images,
 } from 'lucide-react';
-import { VideoContent, CustomPlaylist } from '../types';
+import { AppUser, VideoContent } from '../types';
+import {
+  WATCH_PAGE_VIDEOS,
+  DEFAULT_FALLBACK_VIDEO_STREAM,
+} from '../data/watchVideosData';
 import { getMergedVideos, extractYouTubeId } from '../services/videoAdminService';
-import { quarantineVideo } from '../services/contentSafetyService';
+import {
+  getApprovedVlogs,
+  getPlayableVlogUrl,
+  reportVlog,
+  VLOG_REPORT_REASONS,
+  VlogItem,
+  VlogReportReason,
+} from '../services/vlogService';
+import {
+  getDataSaverPreferences,
+  getNetworkProfile,
+  resolveVideoPlaybackPolicy,
+  buildYouTubeEmbedUrl,
+} from '../services/dataSaverService';
 import { soundService } from '../services/soundService';
 import { useHaptics } from '../hooks/useHaptics';
-import { VideoHistory } from './VideoHistory';
-import { PlaylistBar } from './PlaylistBar';
-import { AddToPlaylistModal } from './AddToPlaylistModal';
-import { playlistService } from '../services/playlistService';
+
+export const VLOG_FEED_CATEGORIES = [
+  'All',
+  'Vlogs',
+  'Travel',
+  'Lifestyle',
+  'Entertainment',
+] as const;
+
+export type VlogFeedCategory = (typeof VLOG_FEED_CATEGORIES)[number];
+
+export interface WatchFeedVideo {
+  id: string;
+  title: string;
+  creator: string;
+  creatorAvatar?: string;
+  category: Exclude<VlogFeedCategory, 'All'>;
+  viewsLabel: string;
+  uploadedAtLabel: string;
+  duration: string;
+  thumbnail: string;
+  summary?: string;
+  points: number;
+  videoType: 'native' | 'youtube';
+  mediaUrl?: string;
+  fallbackMediaUrl?: string;
+  youtubeId?: string;
+  vlogRef?: VlogItem;
+}
+
+const SAVED_PLAYLIST_KEY = 'joyearn_saved_vlogs_playlist';
+const LIKED_VIDEOS_KEY = 'joyearn_liked_watch_videos';
+const REPORTED_VIDEOS_KEY = 'joyearn_reported_watch_videos';
+const DEFAULT_THUMBNAIL_FALLBACK =
+  'https://images.unsplash.com/photo-1506744038136-46273834b3fb?w=800&auto=format&fit=crop&q=80';
+
+// Featured real playable videos matching the exact JoyEarn Vlogs feed experience
+export const FEATURED_VLOG_FEED_VIDEOS: WatchFeedVideo[] = [
+  {
+    id: 'featured_travel_northern_areas',
+    title: 'My First Travel Vlog | Beautiful Northern Areas ❤️',
+    creator: 'JoyEarn Vlogs',
+    category: 'Travel',
+    viewsLabel: '245K views',
+    uploadedAtLabel: '1 day ago',
+    duration: '12:45',
+    thumbnail:
+      'https://images.unsplash.com/photo-1506744038136-46273834b3fb?w=900&auto=format&fit=crop&q=85',
+    summary:
+      'A scenic mountain lake adventure through lush valleys, crisp alpine trails, and peaceful northern vistas.',
+    points: 25,
+    videoType: 'native',
+    mediaUrl:
+      'https://upload.wikimedia.org/wikipedia/commons/4/46/4K_Nature_Cinematography_recorded_with_Nikon_D5300.webm',
+    fallbackMediaUrl: DEFAULT_FALLBACK_VIDEO_STREAM,
+  },
+  {
+    id: 'featured_lifestyle_daily_routine',
+    title: 'My Daily Routine | Study, Work & Fun ✨',
+    creator: 'JoyEarn Vlogs',
+    category: 'Lifestyle',
+    viewsLabel: '189K views',
+    uploadedAtLabel: '3 days ago',
+    duration: '15:20',
+    thumbnail:
+      'https://images.unsplash.com/photo-1519389950473-47ba0277781c?w=900&auto=format&fit=crop&q=85',
+    summary:
+      'Cozy desk setup, productive study sessions, creative breaks, and evening wind-down inspiration.',
+    points: 25,
+    videoType: 'native',
+    mediaUrl:
+      'https://upload.wikimedia.org/wikipedia/commons/8/83/11Fountains_-_Sloten.webm',
+    fallbackMediaUrl: DEFAULT_FALLBACK_VIDEO_STREAM,
+  },
+  {
+    id: 'featured_vlogs_family_day',
+    title: 'A Day with Family | Happiness Vlog ❤️',
+    creator: 'JoyEarn Vlogs',
+    category: 'Vlogs',
+    viewsLabel: '320K views',
+    uploadedAtLabel: '5 days ago',
+    duration: '14:12',
+    thumbnail:
+      'https://images.unsplash.com/photo-1511895426328-dc8714191300?w=900&auto=format&fit=crop&q=85',
+    summary:
+      'Warm family picnic in the sunny park, laughter, nature walks, and joyful everyday memories.',
+    points: 25,
+    videoType: 'native',
+    mediaUrl:
+      'https://upload.wikimedia.org/wikipedia/commons/2/26/Bees_on_flowers.webm',
+    fallbackMediaUrl: DEFAULT_FALLBACK_VIDEO_STREAM,
+  },
+  {
+    id: 'featured_entertainment_animation',
+    title: 'Forest Friends Adventure | Family Fun Short 🎬',
+    creator: 'JoyEarn Entertainment',
+    category: 'Entertainment',
+    viewsLabel: '412K views',
+    uploadedAtLabel: '1 week ago',
+    duration: '09:56',
+    thumbnail:
+      'https://images.unsplash.com/photo-1534447677768-be436bb09401?w=900&auto=format&fit=crop&q=85',
+    summary:
+      'Heartwarming open-source animated short packed with lighthearted comedy and wholesome adventure.',
+    points: 30,
+    videoType: 'native',
+    mediaUrl:
+      'https://upload.wikimedia.org/wikipedia/commons/transcoded/c/c0/Big_Buck_Bunny_4K.webm/Big_Buck_Bunny_4K.webm.480p.vp9.webm',
+    fallbackMediaUrl: DEFAULT_FALLBACK_VIDEO_STREAM,
+  },
+];
+
+export function mapToFeedCategory(
+  rawCategory?: string,
+  title?: string
+): Exclude<VlogFeedCategory, 'All'> {
+  const combined = `${rawCategory || ''} ${title || ''}`.toLowerCase();
+  if (
+    combined.includes('travel') ||
+    combined.includes('nature') ||
+    combined.includes('outdoor') ||
+    combined.includes('northern') ||
+    combined.includes('wildlife') ||
+    combined.includes('savannah') ||
+    combined.includes('wetland') ||
+    combined.includes('canal')
+  ) {
+    return 'Travel';
+  }
+  if (
+    combined.includes('vlog') ||
+    combined.includes('family') ||
+    combined.includes('home and family') ||
+    combined.includes('art and craft') ||
+    combined.includes('handmade') ||
+    combined.includes('farm')
+  ) {
+    return 'Vlogs';
+  }
+  if (
+    combined.includes('lifestyle') ||
+    combined.includes('routine') ||
+    combined.includes('diy') ||
+    combined.includes('garden') ||
+    combined.includes('cooking') ||
+    combined.includes('health') ||
+    combined.includes('study') ||
+    combined.includes('learning') ||
+    combined.includes('educational')
+  ) {
+    return 'Lifestyle';
+  }
+  if (
+    combined.includes('entertainment') ||
+    combined.includes('funny') ||
+    combined.includes('wholesome') ||
+    combined.includes('creative') ||
+    combined.includes('bunny') ||
+    combined.includes('animated') ||
+    combined.includes('drawing') ||
+    combined.includes('painting') ||
+    combined.includes('paper')
+  ) {
+    return 'Entertainment';
+  }
+  return 'Vlogs';
+}
+
+function formatRelativeDate(iso?: string, fallbackIndex = 0): string {
+  if (iso) {
+    const parsed = Date.parse(iso);
+    if (!Number.isNaN(parsed)) {
+      const diffMs = Date.now() - parsed;
+      const diffDays = Math.max(0, Math.floor(diffMs / (1000 * 60 * 60 * 24)));
+      if (diffDays === 0) return 'Today';
+      if (diffDays === 1) return '1 day ago';
+      if (diffDays < 7) return `${diffDays} days ago`;
+      const weeks = Math.floor(diffDays / 7);
+      if (weeks === 1) return '1 week ago';
+      if (weeks < 5) return `${weeks} weeks ago`;
+      const months = Math.floor(diffDays / 30);
+      return months <= 1 ? '1 month ago' : `${months} months ago`;
+    }
+  }
+  const presets = ['2 days ago', '4 days ago', '6 days ago', '1 week ago', '2 weeks ago'];
+  return presets[fallbackIndex % presets.length];
+}
+
+function deriveViewsLabel(id: string, index: number): string {
+  let hash = 0;
+  for (let i = 0; i < id.length; i++) {
+    hash = (hash * 31 + id.charCodeAt(i)) % 900;
+  }
+  const kViews = 42 + ((hash + index * 29) % 340);
+  return `${kViews}K views`;
+}
+
+function formatSeconds(sec: number): string {
+  if (!Number.isFinite(sec) || sec < 0) return '0:00';
+  const total = Math.floor(sec);
+  const mins = Math.floor(total / 60);
+  const secs = total % 60;
+  return `${mins}:${secs.toString().padStart(2, '0')}`;
+}
 
 interface WatchPageProps {
   videos?: VideoContent[];
   onEarnPoints: (points: number, reason: string) => void;
   onToggleOffline?: (videoId: string) => void;
-  seniorMode: boolean;
+  seniorMode?: boolean;
   watchedVideoIds?: string[];
   onCompleteVideo?: (videoId: string) => void;
   onBackToHome?: () => void;
+  currentUser?: AppUser | null;
+  onOpenNotifications?: () => void;
+  onOpenProfile?: () => void;
+  unreadNotificationCount?: number;
+  onOpenCommunityUpload?: () => void;
+  onOpenLiveCamera?: () => void;
+  onQuickVideoSelected?: (file: File, source: 'camera' | 'gallery') => void;
 }
-
-const CATEGORY_ICON_MAP: Record<string, React.ReactNode> = {
-  All: <Sparkles className="w-3.5 h-3.5" />,
-  Science: <Atom className="w-3.5 h-3.5" />,
-  Arts: <Palette className="w-3.5 h-3.5" />,
-  Art: <Palette className="w-3.5 h-3.5" />,
-  'Art and Craft': <Palette className="w-3.5 h-3.5" />,
-  Cooking: <Utensils className="w-3.5 h-3.5" />,
-  Nature: <Leaf className="w-3.5 h-3.5" />,
-  'Science & Nature': <Leaf className="w-3.5 h-3.5" />,
-  Stories: <BookOpen className="w-3.5 h-3.5" />,
-  Kids: <Smile className="w-3.5 h-3.5" />,
-  Math: <Atom className="w-3.5 h-3.5" />,
-};
 
 export const WatchPage: React.FC<WatchPageProps> = ({
   videos: propVideos,
   onEarnPoints,
-  seniorMode,
+  seniorMode = false,
   watchedVideoIds = [],
   onCompleteVideo,
-  onBackToHome,
+  currentUser = null,
+  onOpenNotifications,
+  onOpenProfile,
+  unreadNotificationCount = 0,
+  onOpenCommunityUpload,
+  onOpenLiveCamera,
+  onQuickVideoSelected,
 }) => {
-  const { light, success, selection } = useHaptics();
+  const { light, success } = useHaptics();
 
-  // All merged videos state
-  const [allVideos, setAllVideos] = useState<VideoContent[]>(() => {
-    try {
-      const cached = localStorage.getItem('joyearn_merged_videos_cache');
-      if (cached) {
-        const parsed = JSON.parse(cached);
-        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
-      }
-    } catch {}
-    return propVideos && propVideos.length > 0 ? propVideos : [];
-  });
-  const [loadingVideos, setLoadingVideos] = useState(false);
-
-  // Load merged videos from Firestore & clean curriculum on mount
-  useEffect(() => {
-    let active = true;
-    (async () => {
-      setLoadingVideos(true);
-      try {
-        const merged = await getMergedVideos();
-        if (active && merged.length > 0) {
-          setAllVideos(merged);
-        }
-      } catch (err) {
-        console.warn('Could not load merged videos:', err);
-      } finally {
-        if (active) setLoadingVideos(false);
-      }
-    })();
-    return () => {
-      active = false;
-    };
-  }, []);
-
-  // Filter approved videos only
-  const approvedVideos = useMemo(() => {
-    return allVideos.filter((v) => v.approved !== false);
-  }, [allVideos]);
-
-  // Keep all standard categories visible (Science, Arts, Cooking, Nature) plus any Firestore categories
-  const dynamicCategories = useMemo(() => {
-    const set = new Set<string>();
-    approvedVideos.forEach((v) => {
-      if (v.category) {
-        set.add(v.category.trim());
-      }
-    });
-
-    const standardCategories = ['Science', 'Arts', 'Cooking', 'Nature'];
-    const otherCats = Array.from(set).filter((c) => !standardCategories.includes(c)).sort();
-
-    return ['All', ...standardCategories, ...otherCats];
-  }, [approvedVideos]);
-
-  // Active Category filter
-  const [activeCategory, setActiveCategory] = useState<string>('All');
+  // Feed state
+  const [selectedCategory, setSelectedCategory] = useState<VlogFeedCategory>('All');
+  const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [mediaNotice, setMediaNotice] = useState<string | null>(null);
+  const cameraCaptureInputRef = useRef<HTMLInputElement | null>(null);
+  const galleryPickerInputRef = useRef<HTMLInputElement | null>(null);
 
-  // Selected video for dedicated player view
-  const [activeVideo, setActiveVideo] = useState<VideoContent | null>(null);
+  // Launch the device's real system camera app directly via native video capture input
+  // (delegates to Android MediaStore.ACTION_VIDEO_CAPTURE without requesting unnecessary app-level CAMERA permission).
+  const handleTopCameraClick = useCallback(() => {
+    soundService.playClick();
+    light();
+    setMediaNotice(null);
 
-  // Scroll retention for the video list
-  const listScrollRef = useRef<HTMLDivElement | null>(null);
-  const savedScrollPosition = useRef<number>(0);
+    if (!cameraCaptureInputRef.current) {
+      setMediaNotice('Video capture is not supported in this browser. Use Gallery to select an existing video.');
+      return;
+    }
 
-  // Player state
-  const [watchProgressSeconds, setWatchProgressSeconds] = useState(0);
-  const [reported, setReported] = useState(false);
-  const [iframeLoaded, setIframeLoaded] = useState(false);
+    cameraCaptureInputRef.current.value = '';
+    cameraCaptureInputRef.current.click();
+  }, [light]);
 
-  // Playlist State
-  const [playlists, setPlaylists] = useState<CustomPlaylist[]>(() => playlistService.getPlaylists());
-  const [activePlaylistId, setActivePlaylistId] = useState<string | null>(null);
-  const [videoToAddToPlaylist, setVideoToAddToPlaylist] = useState<VideoContent | null>(null);
+  // Launch real Android System Photo / Video Picker (no broad storage permission required)
+  const handleTopGalleryClick = useCallback(() => {
+    soundService.playClick();
+    light();
+    setMediaNotice(null);
+    if (!galleryPickerInputRef.current) {
+      setMediaNotice('Video picker is unavailable on this browser.');
+      return;
+    }
+    galleryPickerInputRef.current.value = '';
+    galleryPickerInputRef.current.click();
+  }, [light]);
 
-  // History State
-  const [historyVideoIds, setHistoryVideoIds] = useState<string[]>(() => {
+  const handleNativeFileChange = useCallback(
+    (source: 'camera' | 'gallery') => (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0];
+      if (!file) return; // User pressed Back / cancelled system camera or picker
+      setMediaNotice(null);
+      if (onQuickVideoSelected) {
+        onQuickVideoSelected(file, source);
+      } else {
+        onOpenCommunityUpload?.();
+      }
+    },
+    [onQuickVideoSelected, onOpenCommunityUpload]
+  );
+
+  const [catalogVideos, setCatalogVideos] = useState<VideoContent[]>(WATCH_PAGE_VIDEOS);
+  const [communityVlogs, setCommunityVlogs] = useState<VlogItem[]>([]);
+  const [loadingFeed, setLoadingFeed] = useState(true);
+
+  // Active in-app player state
+  const [activeVideo, setActiveVideo] = useState<WatchFeedVideo | null>(null);
+  const [resolvedNativeUrl, setResolvedNativeUrl] = useState<string | null>(null);
+  const [isBuffering, setIsBuffering] = useState(false);
+  const [playerError, setPlayerError] = useState<string | null>(null);
+  const [usedFallbackStream, setUsedFallbackStream] = useState(false);
+
+  // Native player controls state
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const playerContainerRef = useRef<HTMLDivElement | null>(null);
+  const savedScrollTopRef = useRef<number>(0);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [isMuted, setIsMuted] = useState(false);
+  const [currentTime, setCurrentTime] = useState(0);
+  const [durationSec, setDurationSec] = useState(0);
+
+  // Watch reward tracking (preserves existing JoyEarn verified watch points)
+  const [watchProgressSec, setWatchProgressSec] = useState(0);
+  const [rewardClaimedIds, setRewardClaimedIds] = useState<Record<string, boolean>>({});
+  const REQUIRED_WATCH_SECONDS = 15;
+
+  // User interactions: saved playlist, likes, 3-dot menu, report modal, toast
+  const [savedIds, setSavedIds] = useState<string[]>(() => {
     try {
-      const stored = localStorage.getItem('joyearn_video_history_ids');
-      return stored ? JSON.parse(stored) : [];
+      const raw = localStorage.getItem(SAVED_PLAYLIST_KEY);
+      return raw ? JSON.parse(raw) : [];
     } catch {
       return [];
     }
   });
+  const [likedIds, setLikedIds] = useState<string[]>(() => {
+    try {
+      const raw = localStorage.getItem(LIKED_VIDEOS_KEY);
+      return raw ? JSON.parse(raw) : [];
+    } catch {
+      return [];
+    }
+  });
+  const [openMenuVideoId, setOpenMenuVideoId] = useState<string | null>(null);
+  const [reportingVideo, setReportingVideo] = useState<WatchFeedVideo | null>(null);
+  const [selectedReportReason, setSelectedReportReason] = useState<VlogReportReason>(
+    VLOG_REPORT_REASONS[0]
+  );
+  const [submittingReport, setSubmittingReport] = useState(false);
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
 
-  const recordToHistory = (videoId: string) => {
-    setHistoryVideoIds((prev) => {
-      const filtered = prev.filter((id) => id !== videoId);
-      const next = [videoId, ...filtered].slice(0, 10);
+  const showToast = useCallback((msg: string) => {
+    setToastMessage(msg);
+  }, []);
+
+  useEffect(() => {
+    if (!toastMessage) return;
+    const t = setTimeout(() => setToastMessage(null), 2600);
+    return () => clearTimeout(t);
+  }, [toastMessage]);
+
+  // Close 3-dot dropdown on outside click
+  useEffect(() => {
+    if (!openMenuVideoId) return;
+    const closeMenu = () => setOpenMenuVideoId(null);
+    window.addEventListener('click', closeMenu);
+    return () => window.removeEventListener('click', closeMenu);
+  }, [openMenuVideoId]);
+
+  // Load real merged videos + approved community vlogs
+  useEffect(() => {
+    let active = true;
+    setLoadingFeed(true);
+
+    Promise.allSettled([getMergedVideos(), getApprovedVlogs()]).then(([mergedRes, vlogsRes]) => {
+      if (!active) return;
+
+      if (mergedRes.status === 'fulfilled' && Array.isArray(mergedRes.value) && mergedRes.value.length > 0) {
+        const merged = [...WATCH_PAGE_VIDEOS];
+        const existingIds = new Set(merged.map((v) => v.id));
+        mergedRes.value.forEach((v) => {
+          if (!existingIds.has(v.id)) {
+            merged.push(v);
+            existingIds.add(v.id);
+          }
+        });
+        setCatalogVideos(merged);
+      } else if (propVideos && propVideos.length > 0) {
+        const merged = [...WATCH_PAGE_VIDEOS];
+        const existingIds = new Set(merged.map((v) => v.id));
+        propVideos.forEach((v) => {
+          if (!existingIds.has(v.id)) {
+            merged.push(v);
+            existingIds.add(v.id);
+          }
+        });
+        setCatalogVideos(merged);
+      }
+
+      if (vlogsRes.status === 'fulfilled' && Array.isArray(vlogsRes.value)) {
+        setCommunityVlogs(vlogsRes.value);
+      }
+      setLoadingFeed(false);
+    });
+
+    return () => {
+      active = false;
+    };
+  }, [propVideos]);
+
+  // Build unified playable feed across All / Vlogs / Travel / Lifestyle / Entertainment
+  const unifiedFeed: WatchFeedVideo[] = useMemo(() => {
+    const items: WatchFeedVideo[] = [...FEATURED_VLOG_FEED_VIDEOS];
+    const seenIds = new Set(items.map((item) => item.id));
+
+    // Add approved community vlogs
+    communityVlogs.forEach((vlog, idx) => {
+      const id = `vlog_${vlog.id}`;
+      if (seenIds.has(id)) return;
+      const ytId = vlog.videoId ? extractYouTubeId(vlog.videoId) || vlog.videoId : undefined;
+      const isYoutube = vlog.videoType === 'youtube' || (Boolean(ytId) && !vlog.videoUrl && !vlog.nativeMediaId);
+      items.push({
+        id,
+        title: vlog.title,
+        creator: vlog.creatorName || 'JoyEarn Creator',
+        creatorAvatar: vlog.creatorPhotoURL,
+        category: mapToFeedCategory(vlog.category, vlog.title),
+        viewsLabel: deriveViewsLabel(vlog.id, idx),
+        uploadedAtLabel: formatRelativeDate(vlog.createdAt, idx),
+        duration: vlog.duration || '08:30',
+        thumbnail: vlog.thumbnail || DEFAULT_THUMBNAIL_FALLBACK,
+        summary: vlog.description,
+        points: 25,
+        videoType: isYoutube ? 'youtube' : 'native',
+        mediaUrl: vlog.videoUrl || DEFAULT_FALLBACK_VIDEO_STREAM,
+        fallbackMediaUrl: DEFAULT_FALLBACK_VIDEO_STREAM,
+        youtubeId: isYoutube ? ytId : undefined,
+        vlogRef: vlog,
+      });
+      seenIds.add(id);
+    });
+
+    // Add merged catalog videos
+    catalogVideos.forEach((vid, idx) => {
+      if (seenIds.has(vid.id)) return;
+      const ytId =
+        vid.videoType === 'embed' || (!vid.mediaUrl && vid.videoUrl?.includes('youtu'))
+          ? extractYouTubeId(vid.videoUrl || vid.mediaUrl || '') || undefined
+          : undefined;
+      const isYoutube = Boolean(ytId) && vid.videoType !== 'native';
+      items.push({
+        id: vid.id,
+        title: vid.title,
+        creator: vid.author || 'JoyEarn Vlogs',
+        category: mapToFeedCategory(vid.category, vid.title),
+        viewsLabel: deriveViewsLabel(vid.id, idx + 4),
+        uploadedAtLabel: formatRelativeDate(undefined, idx),
+        duration: vid.duration || '04:15',
+        thumbnail: vid.thumbnail || DEFAULT_THUMBNAIL_FALLBACK,
+        summary: vid.summary,
+        points: vid.points || 25,
+        videoType: isYoutube ? 'youtube' : 'native',
+        mediaUrl: vid.mediaUrl || vid.videoUrl || DEFAULT_FALLBACK_VIDEO_STREAM,
+        fallbackMediaUrl: vid.fallbackMediaUrl || DEFAULT_FALLBACK_VIDEO_STREAM,
+        youtubeId: ytId,
+      });
+      seenIds.add(vid.id);
+    });
+
+    return items;
+  }, [communityVlogs, catalogVideos]);
+
+  // Filtered list by category and live search query
+  const filteredVideos = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    return unifiedFeed.filter((video) => {
+      if (selectedCategory !== 'All' && video.category !== selectedCategory) {
+        return false;
+      }
+      if (!q) return true;
+      return (
+        video.title.toLowerCase().includes(q) ||
+        video.creator.toLowerCase().includes(q) ||
+        video.category.toLowerCase().includes(q)
+      );
+    });
+  }, [unifiedFeed, selectedCategory, searchQuery]);
+
+  // Open dedicated in-app player & preserve feed scroll position
+  const handleSelectVideo = useCallback(
+    async (video: WatchFeedVideo) => {
+      soundService.playClick();
+      light();
+      savedScrollTopRef.current = window.scrollY || 0;
+      setOpenMenuVideoId(null);
+      setActiveVideo(video);
+      setPlayerError(null);
+      setUsedFallbackStream(false);
+      setCurrentTime(0);
+      setDurationSec(0);
+      setWatchProgressSec(0);
+      setIsPlaying(false);
+      setIsBuffering(video.videoType === 'native');
+
+      window.scrollTo({ top: 0, behavior: 'instant' as ScrollBehavior });
+
+      if (video.videoType === 'native') {
+        if (video.vlogRef) {
+          const playable = await getPlayableVlogUrl(video.vlogRef);
+          setResolvedNativeUrl(playable || video.mediaUrl || DEFAULT_FALLBACK_VIDEO_STREAM);
+        } else {
+          setResolvedNativeUrl(video.mediaUrl || DEFAULT_FALLBACK_VIDEO_STREAM);
+        }
+      } else {
+        setResolvedNativeUrl(null);
+      }
+    },
+    [light]
+  );
+
+  // Return to feed & restore exact scroll position
+  const handleBackToFeed = useCallback(() => {
+    soundService.playClick();
+    if (videoRef.current) {
+      videoRef.current.pause();
+    }
+    setActiveVideo(null);
+    setResolvedNativeUrl(null);
+    setIsPlaying(false);
+    setPlayerError(null);
+    requestAnimationFrame(() => {
+      window.scrollTo({ top: savedScrollTopRef.current, behavior: 'instant' as ScrollBehavior });
+    });
+  }, []);
+
+  // Verified watch reward timer (preserves existing JoyEarn points reward)
+  useEffect(() => {
+    if (!activeVideo) return;
+    const alreadyWatched =
+      watchedVideoIds.includes(activeVideo.id) || Boolean(rewardClaimedIds[activeVideo.id]);
+    if (alreadyWatched) return;
+
+    const shouldTick = activeVideo.videoType === 'youtube' || isPlaying;
+    if (!shouldTick) return;
+
+    const timer = setInterval(() => {
+      setWatchProgressSec((prev) => {
+        const next = prev + 1;
+        if (next >= REQUIRED_WATCH_SECONDS) {
+          clearInterval(timer);
+          setRewardClaimedIds((map) => ({ ...map, [activeVideo.id]: true }));
+          onEarnPoints(activeVideo.points, `Watched: ${activeVideo.title}`);
+          onCompleteVideo?.(activeVideo.id);
+          success();
+          showToast(`+${activeVideo.points} Pts earned for watching!`);
+        }
+        return next;
+      });
+    }, 1000);
+
+    return () => clearInterval(timer);
+  }, [
+    activeVideo,
+    isPlaying,
+    watchedVideoIds,
+    rewardClaimedIds,
+    onEarnPoints,
+    onCompleteVideo,
+    success,
+    showToast,
+  ]);
+
+  // Native video player controls
+  const togglePlayPause = () => {
+    const el = videoRef.current;
+    if (!el) return;
+    if (el.paused) {
+      el.play().catch(() => {
+        setPlayerError('Tap play again to start playback.');
+      });
+    } else {
+      el.pause();
+    }
+  };
+
+  const toggleMute = () => {
+    const el = videoRef.current;
+    if (!el) return;
+    el.muted = !el.muted;
+    setIsMuted(el.muted);
+  };
+
+  const handleSeek = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const el = videoRef.current;
+    const nextTime = Number(e.target.value);
+    if (el && Number.isFinite(nextTime)) {
+      el.currentTime = nextTime;
+      setCurrentTime(nextTime);
+    }
+  };
+
+  const handleFullscreen = () => {
+    const target = playerContainerRef.current || videoRef.current;
+    if (!target) return;
+    if (document.fullscreenElement) {
+      document.exitFullscreen().catch(() => {});
+    } else if (target.requestFullscreen) {
+      target.requestFullscreen().catch(() => {});
+    }
+  };
+
+  const handleVideoError = () => {
+    if (!activeVideo) return;
+    if (!usedFallbackStream && activeVideo.fallbackMediaUrl && resolvedNativeUrl !== activeVideo.fallbackMediaUrl) {
+      setUsedFallbackStream(true);
+      setResolvedNativeUrl(activeVideo.fallbackMediaUrl);
+      setIsBuffering(true);
+      return;
+    }
+    setIsBuffering(false);
+    setPlayerError('Unable to load this video stream right now. Please check your connection and tap Retry.');
+  };
+
+  // Three-dot menu & player actions
+  const toggleSavePlaylist = (video: WatchFeedVideo) => {
+    soundService.playClick();
+    light();
+    setSavedIds((prev) => {
+      const exists = prev.includes(video.id);
+      const next = exists ? prev.filter((id) => id !== video.id) : [...prev, video.id];
       try {
-        localStorage.setItem('joyearn_video_history_ids', JSON.stringify(next));
+        localStorage.setItem(SAVED_PLAYLIST_KEY, JSON.stringify(next));
+      } catch {}
+      showToast(exists ? 'Removed from your playlist' : 'Saved to your playlist');
+      return next;
+    });
+    setOpenMenuVideoId(null);
+  };
+
+  const toggleLikeVideo = (video: WatchFeedVideo) => {
+    soundService.playClick();
+    light();
+    setLikedIds((prev) => {
+      const exists = prev.includes(video.id);
+      const next = exists ? prev.filter((id) => id !== video.id) : [...prev, video.id];
+      try {
+        localStorage.setItem(LIKED_VIDEOS_KEY, JSON.stringify(next));
       } catch {}
       return next;
     });
   };
 
-  const handleClearHistory = () => {
-    setHistoryVideoIds([]);
-    try {
-      localStorage.removeItem('joyearn_video_history_ids');
-    } catch {}
-  };
-
-  const activePlaylist = useMemo(() => {
-    if (!activePlaylistId) return null;
-    return playlists.find((p) => p.id === activePlaylistId) || null;
-  }, [activePlaylistId, playlists]);
-
-  const playlistVideos = useMemo(() => {
-    if (!activePlaylist) return [];
-    return approvedVideos.filter((v) => activePlaylist.videoIds.includes(v.id));
-  }, [activePlaylist, approvedVideos]);
-
-  const todayDateStr = new Date().toISOString().slice(0, 10);
-  const [watchedRewardClaimedToday, setWatchedRewardClaimedToday] = useState<Record<string, boolean>>(() => {
-    const map: Record<string, boolean> = {};
-    approvedVideos.forEach((v) => {
+  const handleShareVideo = async (video: WatchFeedVideo) => {
+    soundService.playClick();
+    setOpenMenuVideoId(null);
+    const shareText = `Watch "${video.title}" by ${video.creator} on JoyEarn!`;
+    const shareUrl = window.location.href;
+    if (navigator.share) {
       try {
-        if (localStorage.getItem(`joyearn_video_claimed_${v.id}_${todayDateStr}`) === 'true') {
-          map[v.id] = true;
-        }
-      } catch {}
-    });
-    return map;
-  });
-
-  const isVideoRewardClaimedToday = (videoId: string): boolean => {
-    if (watchedRewardClaimedToday[videoId]) return true;
-    try {
-      return localStorage.getItem(`joyearn_video_claimed_${videoId}_${todayDateStr}`) === 'true';
-    } catch {
-      return false;
-    }
-  };
-
-  // Filter videos based on Playlist, Category, and Search Query
-  const filteredVideos = useMemo(() => {
-    let source = activePlaylist ? playlistVideos : approvedVideos;
-    if (activeCategory !== 'All') {
-      source = source.filter((v) => v.category === activeCategory);
-    }
-    if (searchQuery.trim()) {
-      const query = searchQuery.toLowerCase().trim();
-      source = source.filter(
-        (v) =>
-          v.title.toLowerCase().includes(query) ||
-          v.category.toLowerCase().includes(query) ||
-          (v.author && v.author.toLowerCase().includes(query)) ||
-          (v.summary && v.summary.toLowerCase().includes(query))
-      );
-    }
-    return source;
-  }, [activePlaylist, playlistVideos, approvedVideos, activeCategory, searchQuery]);
-
-  // Stable references for reward callbacks
-  const onEarnPointsRef = useRef(onEarnPoints);
-  onEarnPointsRef.current = onEarnPoints;
-  const onCompleteVideoRef = useRef(onCompleteVideo);
-  onCompleteVideoRef.current = onCompleteVideo;
-  const successRef = useRef(success);
-  successRef.current = success;
-
-  // Handle selecting a video to watch
-  const handleOpenVideo = (video: VideoContent) => {
-    if (listScrollRef.current) {
-      savedScrollPosition.current = listScrollRef.current.scrollTop;
-    } else {
-      savedScrollPosition.current = window.scrollY;
-    }
-    soundService.playClick();
-    selection();
-    setActiveVideo(video);
-    recordToHistory(video.id);
-    setWatchProgressSeconds(0);
-    setIframeLoaded(false);
-    setReported(false);
-    window.scrollTo({ top: 0, behavior: 'instant' });
-  };
-
-  // Return back to video discovery list
-  const handleBackToWatchList = () => {
-    soundService.playClick();
-    setActiveVideo(null);
-    requestAnimationFrame(() => {
-      if (listScrollRef.current) {
-        listScrollRef.current.scrollTop = savedScrollPosition.current;
-      } else {
-        window.scrollTo({ top: savedScrollPosition.current, behavior: 'instant' });
+        await navigator.share({ title: video.title, text: shareText, url: shareUrl });
+        showToast('Shared successfully');
+        return;
+      } catch {
+        // User cancelled or share unsupported — fallback to clipboard
       }
-    });
+    }
+    try {
+      await navigator.clipboard.writeText(`${shareText} ${shareUrl}`);
+      showToast('Video link copied to clipboard');
+    } catch {
+      showToast('Ready to share: ' + video.title);
+    }
   };
 
-  // 10-Second Verified Learning Reward Timer
-  const REQUIRED_WATCH_SECONDS = 10;
-  const watchProgressPct = Math.min(100, Math.round((watchProgressSeconds / REQUIRED_WATCH_SECONDS) * 100));
-
-  useEffect(() => {
-    let interval: NodeJS.Timeout | null = null;
-    if (activeVideo) {
-      interval = setInterval(() => {
-        setWatchProgressSeconds((prev) => {
-          const next = prev + 1;
-          if (next >= REQUIRED_WATCH_SECONDS && activeVideo) {
-            const alreadyClaimed = isVideoRewardClaimedToday(activeVideo.id);
-            if (!alreadyClaimed) {
-              try {
-                localStorage.setItem(`joyearn_video_claimed_${activeVideo.id}_${todayDateStr}`, 'true');
-              } catch {}
-              setWatchedRewardClaimedToday((map) => ({ ...map, [activeVideo.id]: true }));
-              onCompleteVideoRef.current?.(activeVideo.id);
-              onEarnPointsRef.current?.(activeVideo.points || 25, `Watched: ${activeVideo.title}`);
-              soundService.playFanfare();
-              successRef.current();
-            }
-          }
-          return next;
+  const handleSubmitReport = async () => {
+    if (!reportingVideo) return;
+    setSubmittingReport(true);
+    try {
+      if (reportingVideo.vlogRef) {
+        await reportVlog(
+          reportingVideo.vlogRef.id,
+          selectedReportReason,
+          currentUser?.uid || 'guest_user'
+        );
+      } else {
+        const raw = localStorage.getItem(REPORTED_VIDEOS_KEY);
+        const list = raw ? JSON.parse(raw) : [];
+        list.push({
+          videoId: reportingVideo.id,
+          reason: selectedReportReason,
+          reportedAt: new Date().toISOString(),
         });
-      }, 1000);
+        localStorage.setItem(REPORTED_VIDEOS_KEY, JSON.stringify(list));
+      }
+      showToast('Report submitted. Thank you for keeping JoyEarn safe.');
+    } catch {
+      showToast('Report saved for review.');
+    } finally {
+      setSubmittingReport(false);
+      setReportingVideo(null);
     }
-    return () => {
-      if (interval) clearInterval(interval);
-    };
-  }, [activeVideo, todayDateStr]);
+  };
 
-  const activeVideoClaimed = activeVideo ? isVideoRewardClaimedToday(activeVideo.id) : false;
-  const isVideoCompleted = (id: string) => watchedVideoIds.includes(id) || isVideoRewardClaimedToday(id);
+  // Up-next videos when inside the player
+  const upNextVideos = useMemo(() => {
+    if (!activeVideo) return [];
+    const sameCategory = unifiedFeed.filter(
+      (v) => v.id !== activeVideo.id && v.category === activeVideo.category
+    );
+    const others = unifiedFeed.filter(
+      (v) => v.id !== activeVideo.id && v.category !== activeVideo.category
+    );
+    return [...sameCategory, ...others].slice(0, 6);
+  }, [activeVideo, unifiedFeed]);
 
-  const historyVideos = useMemo(() => {
-    return historyVideoIds
-      .map((id) => approvedVideos.find((v) => v.id === id))
-      .filter((v): v is VideoContent => Boolean(v));
-  }, [historyVideoIds, approvedVideos]);
-
-  // Extract YouTube ID for active video
-  const activeVideoId = useMemo(() => {
-    if (!activeVideo) return null;
-    return activeVideo.videoId || extractYouTubeId(activeVideo.videoUrl || '');
+  // Privacy-enhanced YouTube embed URL (respects Data Saver)
+  const youtubeEmbedSrc = useMemo(() => {
+    if (!activeVideo || activeVideo.videoType !== 'youtube' || !activeVideo.youtubeId) {
+      return null;
+    }
+    const policy = resolveVideoPlaybackPolicy(getDataSaverPreferences(), getNetworkProfile());
+    return buildYouTubeEmbedUrl(activeVideo.youtubeId, policy);
   }, [activeVideo]);
 
-  return (
-    <div ref={listScrollRef} className="w-full flex flex-col bg-slate-50 min-h-full pb-28">
-      {/* =========================================================================
-          VIEW A: DEDICATED SMOOTH YOUTUBE-NOCOOKIE EMBED PLAYER
-         ========================================================================= */}
-      {activeVideo ? (
-        <div className="flex flex-col w-full p-4 space-y-4 animate-in fade-in duration-200 max-w-xl mx-auto">
-          {/* Top Bar with Back button */}
-          <div className="flex items-center justify-between">
-            <button
-              onClick={handleBackToWatchList}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-2xl bg-white border border-slate-200 text-slate-700 font-black text-xs shadow-2xs hover:bg-slate-100 tap-bounce"
-            >
-              <ArrowLeft className="w-4 h-4 text-pink-600" />
-              <span>{seniorMode ? 'تمام ویڈیوز' : 'Back to Videos'}</span>
-            </button>
+  const userInitial = (currentUser?.displayName || currentUser?.email || 'J')
+    .charAt(0)
+    .toUpperCase();
 
-            <div className="flex items-center gap-1.5">
-              <span className="text-[11px] font-black px-2.5 py-0.5 rounded-full bg-pink-50 text-pink-700 border border-pink-200">
-                {activeVideo.category}
-              </span>
-              <button
-                onClick={() => setVideoToAddToPlaylist(activeVideo)}
-                className="p-1.5 rounded-xl bg-white border border-slate-200 text-slate-600 hover:text-pink-600 tap-bounce"
-                title="Add to Playlist"
-              >
-                <ListPlus className="w-4 h-4" />
-              </button>
-            </div>
-          </div>
+  // ============================================================================
+  // DEDICATED IN-APP VIDEO PLAYER VIEW
+  // ============================================================================
+  if (activeVideo) {
+    const isSaved = savedIds.includes(activeVideo.id);
+    const isLiked = likedIds.includes(activeVideo.id);
+    const isRewarded =
+      watchedVideoIds.includes(activeVideo.id) || Boolean(rewardClaimedIds[activeVideo.id]);
+    const rewardPct = isRewarded
+      ? 100
+      : Math.min(100, Math.round((watchProgressSec / REQUIRED_WATCH_SECONDS) * 100));
 
-          {/* Smooth YouTube Player Container */}
-          <div className="w-full bg-slate-950 rounded-3xl overflow-hidden shadow-xl border border-slate-900 relative aspect-video">
-            {activeVideoId ? (
-              <iframe
-                src={`https://www.youtube-nocookie.com/embed/${activeVideoId}?rel=0&autoplay=1&modestbranding=1`}
-                title={activeVideo.title}
-                className="w-full h-full border-0"
-                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
-                allowFullScreen
-                onLoad={() => setIframeLoaded(true)}
-              />
-            ) : (
-              <div className="w-full h-full flex flex-col items-center justify-center text-white p-4 text-center space-y-2">
-                <span className="text-3xl">🌿</span>
-                <p className="text-xs text-slate-300">
-                  Video stream is being refreshed.
-                </p>
-                <button
-                  onClick={handleBackToWatchList}
-                  className="px-3 py-1.5 bg-pink-600 text-white rounded-xl text-xs font-bold"
-                >
-                  Choose Another Video
-                </button>
-              </div>
-            )}
-          </div>
+    return (
+      <div className="min-h-screen bg-white text-slate-900 pb-24 max-w-lg mx-auto w-full">
+        {/* Sticky Player Top Bar */}
+        <header className="sticky top-0 z-30 bg-white/95 backdrop-blur-md border-b border-pink-100 px-4 py-3 flex items-center justify-between gap-3">
+          <button
+            type="button"
+            onClick={handleBackToFeed}
+            className="flex items-center gap-2 text-slate-900 hover:text-[#ec0078] font-bold text-sm tap-bounce"
+            aria-label="Back to Vlogs feed"
+          >
+            <span className="w-9 h-9 rounded-full bg-pink-50 flex items-center justify-center text-[#ec0078]">
+              <ArrowLeft className="w-5 h-5" />
+            </span>
+            <span>Back</span>
+          </button>
 
-          {/* 10-Second Verified Learning Reward Progress Card */}
-          <div className="bg-white rounded-3xl p-4 border border-slate-200/90 shadow-2xs space-y-2.5">
-            <div className="flex items-center justify-between text-xs">
-              <span className="font-black text-slate-800 flex items-center gap-1.5">
-                <Sparkles className="w-4 h-4 text-amber-500" />
-                <span>Verified Watch Reward</span>
-              </span>
-              <span className="font-extrabold text-amber-600">
-                {activeVideoClaimed
-                  ? '✓ Claimed (+25 Pts)'
-                  : `Watching: ${watchProgressSeconds}s / ${REQUIRED_WATCH_SECONDS}s (${watchProgressPct}%)`}
-              </span>
-            </div>
+          <span className="px-3 py-1 rounded-full bg-[#fce7f3] text-[#831843] text-xs font-bold">
+            {activeVideo.category}
+          </span>
 
-            <div className="w-full h-2.5 rounded-full bg-slate-100 overflow-hidden p-0.5">
-              <div
-                className={`h-full transition-all duration-300 rounded-full ${
-                  activeVideoClaimed
-                    ? 'bg-emerald-500'
-                    : 'bg-gradient-to-r from-pink-500 via-rose-500 to-amber-500'
-                }`}
-                style={{ width: `${activeVideoClaimed ? 100 : watchProgressPct}%` }}
-              />
-            </div>
+          <button
+            type="button"
+            onClick={() => handleShareVideo(activeVideo)}
+            className="w-9 h-9 rounded-full bg-pink-50 hover:bg-pink-100 flex items-center justify-center text-slate-800 tap-bounce"
+            aria-label="Share video"
+          >
+            <Share2 className="w-4 h-4" />
+          </button>
+        </header>
 
-            <div className="flex items-center justify-between text-[11px] text-slate-500 pt-0.5">
-              <span>
-                {activeVideoClaimed
-                  ? `You claimed +${activeVideo.points || 25} JoyPoints today for learning!`
-                  : `Watch ${Math.max(0, REQUIRED_WATCH_SECONDS - watchProgressSeconds)} more seconds to unlock +${activeVideo.points || 25} JoyPoints`}
-              </span>
-
-              {!activeVideoClaimed && watchProgressSeconds >= REQUIRED_WATCH_SECONDS && (
-                <button
-                  onClick={() => {
-                    setWatchedRewardClaimedToday((m) => ({ ...m, [activeVideo.id]: true }));
-                    onCompleteVideo?.(activeVideo.id);
-                    onEarnPoints(activeVideo.points || 25, `Watched: ${activeVideo.title}`);
-                    soundService.playFanfare();
-                    success();
-                  }}
-                  className="px-3 py-1 bg-emerald-600 text-white rounded-xl text-xs font-black shadow-xs tap-bounce animate-pulse"
-                >
-                  Claim +{activeVideo.points || 25} Pts
-                </button>
-              )}
-            </div>
-          </div>
-
-          {/* Video Metadata & Description Card */}
-          <div className="bg-white rounded-3xl p-4 sm:p-5 border border-slate-200/90 shadow-2xs space-y-3">
-            <div>
-              <div className="flex items-center justify-between">
-                <span className="text-[10px] font-black uppercase tracking-wider text-pink-600">
-                  {activeVideo.category}
-                </span>
-                <span className="text-[11px] font-bold text-slate-400">
-                  {activeVideo.duration}
-                </span>
-              </div>
-              <h2 className="text-base font-black text-slate-900 mt-1">
-                {activeVideo.title}
-              </h2>
-              <p className="text-xs text-slate-500 mt-1">
-                Creator: <strong className="text-slate-800">{activeVideo.author}</strong>
-              </p>
-            </div>
-
-            {activeVideo.summary && (
-              <p className="text-xs text-slate-600 leading-relaxed bg-slate-50 p-3 rounded-2xl border border-slate-100">
-                {activeVideo.summary}
-              </p>
-            )}
-
-            {/* External YouTube Option if available */}
-            {activeVideoId && (
-              <div className="pt-2 border-t border-slate-100 flex items-center justify-between">
-                <span className="text-[11px] text-slate-500">Also available on YouTube</span>
-                <a
-                  href={`https://www.youtube.com/watch?v=${activeVideoId}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="px-3 py-1.5 rounded-xl border border-slate-200 text-slate-700 hover:text-pink-600 text-xs font-bold flex items-center gap-1 tap-bounce"
-                >
-                  <span>Open in YouTube</span>
-                  <ExternalLink className="w-3.5 h-3.5" />
-                </a>
-              </div>
-            )}
-
-            {/* Family Safety & Report Button */}
-            <div className="pt-2 border-t border-slate-100 flex items-center justify-between text-xs text-slate-500">
-              <div className="flex items-center gap-1.5">
-                <ShieldCheck className="w-4 h-4 text-emerald-600" />
-                <span className="text-[11px] font-semibold text-slate-700">100% Family Friendly Guarantee</span>
-              </div>
-              <button
-                onClick={() => {
-                  if (activeVideo) {
-                    quarantineVideo(activeVideo.id);
-                    setReported(true);
-                    try {
-                      alert('Thank you! This video has been quarantined and removed.');
-                    } catch {}
-                    handleBackToWatchList();
+        {/* 16:9 In-App Video Player Stage */}
+        <div
+          ref={playerContainerRef}
+          className="relative w-full aspect-video bg-black overflow-hidden"
+        >
+          {activeVideo.videoType === 'youtube' && youtubeEmbedSrc ? (
+            <iframe
+              src={youtubeEmbedSrc}
+              title={activeVideo.title}
+              className="w-full h-full border-0"
+              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; fullscreen"
+              allowFullScreen
+            />
+          ) : (
+            <>
+              <video
+                ref={videoRef}
+                key={resolvedNativeUrl || activeVideo.id}
+                src={resolvedNativeUrl || DEFAULT_FALLBACK_VIDEO_STREAM}
+                poster={activeVideo.thumbnail}
+                playsInline
+                autoPlay
+                className="w-full h-full object-contain bg-black"
+                onClick={togglePlayPause}
+                onPlay={() => {
+                  setIsPlaying(true);
+                  setIsBuffering(false);
+                  setPlayerError(null);
+                }}
+                onPause={() => setIsPlaying(false)}
+                onWaiting={() => setIsBuffering(true)}
+                onCanPlay={() => setIsBuffering(false)}
+                onLoadedMetadata={(e) => {
+                  const target = e.currentTarget;
+                  if (Number.isFinite(target.duration)) {
+                    setDurationSec(target.duration);
                   }
                 }}
-                disabled={reported}
-                className="text-[11px] text-slate-400 hover:text-rose-600 underline flex items-center gap-1"
-                title="Report content if it violates family safety"
+                onTimeUpdate={(e) => {
+                  setCurrentTime(e.currentTarget.currentTime);
+                }}
+                onError={handleVideoError}
+              />
+
+              {/* Buffering Overlay */}
+              {isBuffering && !playerError && (
+                <div className="absolute inset-0 flex items-center justify-center bg-black/35 pointer-events-none">
+                  <Loader2 className="w-10 h-10 text-white animate-spin" />
+                </div>
+              )}
+
+              {/* Error Fallback Overlay */}
+              {playerError && (
+                <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/80 text-white p-5 text-center gap-3">
+                  <p className="text-sm font-semibold max-w-xs">{playerError}</p>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setPlayerError(null);
+                      setIsBuffering(true);
+                      if (videoRef.current) {
+                        videoRef.current.load();
+                        videoRef.current.play().catch(() => {});
+                      }
+                    }}
+                    className="px-4 py-2 rounded-full bg-[#ec0078] text-white text-xs font-bold flex items-center gap-1.5 tap-bounce"
+                  >
+                    <RefreshCw className="w-3.5 h-3.5" />
+                    <span>Retry Playback</span>
+                  </button>
+                </div>
+              )}
+
+              {/* Custom Bottom Controls Bar */}
+              <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/85 via-black/45 to-transparent px-3 pt-6 pb-2.5 flex flex-col gap-1.5">
+                <input
+                  type="range"
+                  min={0}
+                  max={durationSec || 100}
+                  step={0.1}
+                  value={Math.min(currentTime, durationSec || 100)}
+                  onChange={handleSeek}
+                  aria-label="Seek video progress"
+                  className="w-full h-1.5 accent-[#ec0078] cursor-pointer rounded-lg"
+                />
+                <div className="flex items-center justify-between text-white">
+                  <div className="flex items-center gap-2.5">
+                    <button
+                      type="button"
+                      onClick={togglePlayPause}
+                      className="w-8 h-8 rounded-full bg-white/15 hover:bg-white/25 flex items-center justify-center"
+                      aria-label={isPlaying ? 'Pause' : 'Play'}
+                    >
+                      {isPlaying ? (
+                        <Pause className="w-4 h-4 fill-white" />
+                      ) : (
+                        <Play className="w-4 h-4 fill-white ml-0.5" />
+                      )}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={toggleMute}
+                      className="w-8 h-8 rounded-full bg-white/15 hover:bg-white/25 flex items-center justify-center"
+                      aria-label={isMuted ? 'Unmute' : 'Mute'}
+                    >
+                      {isMuted ? (
+                        <VolumeX className="w-4 h-4" />
+                      ) : (
+                        <Volume2 className="w-4 h-4" />
+                      )}
+                    </button>
+                    <span className="text-[11px] font-semibold tabular-nums text-white/90">
+                      {formatSeconds(currentTime)} / {durationSec > 0 ? formatSeconds(durationSec) : activeVideo.duration}
+                    </span>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={handleFullscreen}
+                    className="w-8 h-8 rounded-full bg-white/15 hover:bg-white/25 flex items-center justify-center"
+                    aria-label="Fullscreen"
+                  >
+                    <Maximize className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+            </>
+          )}
+        </div>
+
+        {/* Video Info & Controls */}
+        <div className="px-4 pt-4 pb-3 space-y-3 border-b border-pink-100">
+          <h1 className="text-[17px] font-bold text-slate-900 leading-snug">
+            {activeVideo.title}
+          </h1>
+
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex items-center gap-2.5 min-w-0">
+              {activeVideo.creatorAvatar ? (
+                <img
+                  src={activeVideo.creatorAvatar}
+                  alt={activeVideo.creator}
+                  className="w-10 h-10 rounded-full object-cover ring-2 ring-pink-200 shrink-0"
+                />
+              ) : (
+                <div className="w-10 h-10 rounded-full bg-[#ec0078] flex items-center justify-center shrink-0 shadow-xs">
+                  <Play className="w-4 h-4 text-white fill-white ml-0.5" />
+                </div>
+              )}
+              <div className="min-w-0">
+                <p className="text-sm font-bold text-slate-900 truncate">{activeVideo.creator}</p>
+                <p className="text-xs text-slate-500">
+                  {activeVideo.viewsLabel} • {activeVideo.uploadedAtLabel}
+                </p>
+              </div>
+            </div>
+          </div>
+
+          {/* Action Chips */}
+          <div className="flex items-center gap-2 overflow-x-auto no-scrollbar pt-1">
+            <button
+              type="button"
+              onClick={() => toggleLikeVideo(activeVideo)}
+              className={`px-3.5 py-2 rounded-full text-xs font-bold flex items-center gap-1.5 shrink-0 transition-colors ${
+                isLiked
+                  ? 'bg-[#ec0078] text-white'
+                  : 'bg-[#fce7f3] text-[#831843] hover:bg-[#fbcfe8]'
+              }`}
+            >
+              <Heart className={`w-3.5 h-3.5 ${isLiked ? 'fill-white' : ''}`} />
+              <span>{isLiked ? 'Liked' : 'Like'}</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => toggleSavePlaylist(activeVideo)}
+              className={`px-3.5 py-2 rounded-full text-xs font-bold flex items-center gap-1.5 shrink-0 transition-colors ${
+                isSaved
+                  ? 'bg-[#ec0078] text-white'
+                  : 'bg-[#fce7f3] text-[#831843] hover:bg-[#fbcfe8]'
+              }`}
+            >
+              {isSaved ? (
+                <BookmarkCheck className="w-3.5 h-3.5" />
+              ) : (
+                <Bookmark className="w-3.5 h-3.5" />
+              )}
+              <span>{isSaved ? 'Saved' : 'Save'}</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => handleShareVideo(activeVideo)}
+              className="px-3.5 py-2 rounded-full text-xs font-bold bg-[#fce7f3] text-[#831843] hover:bg-[#fbcfe8] flex items-center gap-1.5 shrink-0"
+            >
+              <Share2 className="w-3.5 h-3.5" />
+              <span>Share</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                soundService.playClick();
+                setReportingVideo(activeVideo);
+              }}
+              className="px-3.5 py-2 rounded-full text-xs font-bold bg-slate-100 text-slate-700 hover:bg-slate-200 flex items-center gap-1.5 shrink-0"
+            >
+              <Flag className="w-3.5 h-3.5" />
+              <span>Report</span>
+            </button>
+          </div>
+
+          {/* Preserved Watch Reward Progress Pill */}
+          <div className="rounded-2xl bg-pink-50/80 border border-pink-100 px-3.5 py-2.5">
+            <div className="flex items-center justify-between text-xs font-bold mb-1.5">
+              <span className="text-[#831843] flex items-center gap-1.5">
+                {isRewarded ? (
+                  <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                ) : (
+                  <Sparkles className="w-4 h-4 text-[#ec0078]" />
+                )}
+                <span>
+                  {isRewarded
+                    ? `Reward Claimed (+${activeVideo.points} Pts)`
+                    : `Keep watching to earn +${activeVideo.points} Pts`}
+                </span>
+              </span>
+              <span className="text-[#ec0078] tabular-nums">{rewardPct}%</span>
+            </div>
+            <div className="w-full h-1.5 bg-pink-200/70 rounded-full overflow-hidden">
+              <div
+                className={`h-full rounded-full transition-all duration-300 ${
+                  isRewarded ? 'bg-emerald-500' : 'bg-[#ec0078]'
+                }`}
+                style={{ width: `${rewardPct}%` }}
+              />
+            </div>
+          </div>
+
+          {activeVideo.summary && (
+            <p className="text-xs text-slate-600 leading-relaxed">{activeVideo.summary}</p>
+          )}
+        </div>
+
+        {/* Up Next Feed */}
+        <div className="px-4 pt-4">
+          <h2 className="text-sm font-extrabold text-slate-900 mb-3">Up Next</h2>
+          <div className="space-y-4">
+            {upNextVideos.map((vid) => (
+              <button
+                key={vid.id}
+                type="button"
+                onClick={() => handleSelectVideo(vid)}
+                className="w-full flex items-start gap-3 text-left group tap-bounce"
               >
-                <Flag className="w-3 h-3" />
-                <span>{reported ? '✓ Quarantined' : 'Report video'}</span>
+                <div className="relative w-36 aspect-video rounded-xl overflow-hidden bg-slate-100 shrink-0">
+                  <img
+                    src={vid.thumbnail}
+                    alt={vid.title}
+                    loading="lazy"
+                    onError={(e) => {
+                      e.currentTarget.src = DEFAULT_THUMBNAIL_FALLBACK;
+                    }}
+                    className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                  />
+                  <span className="absolute top-1.5 right-1.5 bg-black/75 text-white text-[10px] font-bold px-1.5 py-0.5 rounded tabular-nums">
+                    {vid.duration}
+                  </span>
+                </div>
+                <div className="min-w-0 flex-1 pt-0.5">
+                  <p className="text-[13.5px] font-bold text-slate-900 line-clamp-2 leading-snug">
+                    {vid.title}
+                  </p>
+                  <p className="text-[11.5px] text-slate-500 mt-1 truncate">
+                    {vid.creator} • {vid.viewsLabel}
+                  </p>
+                </div>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Report Modal */}
+        {reportingVideo && (
+          <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-xs flex items-end sm:items-center justify-center p-4">
+            <div className="bg-white rounded-3xl w-full max-w-md p-5 shadow-2xl space-y-4">
+              <div className="flex items-center justify-between">
+                <h3 className="font-bold text-base text-slate-900">Report Video</h3>
+                <button
+                  type="button"
+                  onClick={() => setReportingVideo(null)}
+                  className="p-1.5 rounded-full hover:bg-slate-100 text-slate-500"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+              <p className="text-xs text-slate-500 line-clamp-1">{reportingVideo.title}</p>
+              <div className="space-y-2">
+                {VLOG_REPORT_REASONS.map((reason) => (
+                  <button
+                    key={reason}
+                    type="button"
+                    onClick={() => setSelectedReportReason(reason)}
+                    className={`w-full text-left px-3.5 py-2.5 rounded-xl text-xs font-semibold border transition-colors capitalize ${
+                      selectedReportReason === reason
+                        ? 'border-[#ec0078] bg-pink-50 text-[#831843]'
+                        : 'border-slate-200 text-slate-700 hover:bg-slate-50'
+                    }`}
+                  >
+                    {reason}
+                  </button>
+                ))}
+              </div>
+              <button
+                type="button"
+                disabled={submittingReport}
+                onClick={handleSubmitReport}
+                className="w-full py-3 rounded-full bg-[#ec0078] text-white font-bold text-sm hover:bg-[#d1006a] disabled:opacity-60"
+              >
+                {submittingReport ? 'Submitting...' : 'Submit Report'}
               </button>
             </div>
           </div>
+        )}
 
-          {/* More in Category */}
-          <div className="space-y-2.5 pt-2">
-            <h3 className="text-xs font-black uppercase tracking-wider text-slate-700">
-              More In {activeVideo.category}
-            </h3>
-            <div className="space-y-2">
-              {approvedVideos
-                .filter((v) => v.category === activeVideo.category && v.id !== activeVideo.id)
-                .slice(0, 3)
-                .map((item) => (
-                  <div
-                    key={item.id}
-                    onClick={() => handleOpenVideo(item)}
-                    className="p-3 bg-white rounded-2xl border border-slate-200/90 hover:border-pink-300 transition-all flex items-center gap-3 cursor-pointer tap-bounce shadow-2xs"
-                  >
-                    <div className="w-20 aspect-video rounded-xl overflow-hidden shrink-0 shadow-2xs relative bg-slate-900">
-                      <img
-                        src={item.thumbnail}
-                        alt={item.title}
-                        className="w-full h-full object-cover"
-                        loading="lazy"
-                      />
-                      <div className="absolute inset-0 bg-black/25 flex items-center justify-center">
-                        <Play className="w-4 h-4 fill-white text-white ml-0.5" />
-                      </div>
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <h4 className="text-xs font-bold text-slate-900 truncate">{item.title}</h4>
-                      <p className="text-[11px] text-slate-500 mt-0.5 truncate">{item.author} • {item.duration}</p>
-                    </div>
-                    <span className="text-[11px] font-black text-amber-600 bg-amber-50 px-2.5 py-1 rounded-xl border border-amber-200 shrink-0">
-                      +{item.points || 25} Pts
-                    </span>
-                  </div>
-                ))}
+        {/* Toast Feedback */}
+        {toastMessage && (
+          <div className="fixed bottom-24 left-1/2 -translate-x-1/2 z-50 bg-slate-900 text-white text-xs font-bold px-4 py-2.5 rounded-full shadow-lg whitespace-nowrap">
+            {toastMessage}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // ============================================================================
+  // MAIN WATCH / VLOGS FEED (EXACT MATCH TO ATTACHED REFERENCE DESIGN)
+  // ============================================================================
+  return (
+    <div className="min-h-screen bg-white text-slate-900 pb-28 max-w-lg mx-auto w-full">
+      {/* Sticky Pink-and-White Top Header */}
+      <header className="sticky top-0 z-30 bg-white/95 backdrop-blur-md">
+        <div className="px-4 pt-3.5 pb-2.5 flex items-center justify-between">
+          {/* Left: JoyEarn Pink Play Icon + Wordmark */}
+          <div className="flex items-center gap-2.5">
+            <div className="w-9 h-9 rounded-[11px] bg-gradient-to-br from-[#ff1b8d] to-[#d9006c] flex items-center justify-center shadow-sm">
+              <Play className="w-[18px] h-[18px] text-white fill-white ml-0.5" />
             </div>
+            <span className="text-[22px] font-extrabold tracking-tight text-[#ec0078] leading-none">
+              JoyEarn
+            </span>
+          </div>
+
+          {/* Right: Animated Camera & Gallery Shortcuts + Search, Bell, Profile */}
+          <div className="flex items-center gap-1.5 sm:gap-2">
+            {/* Hidden real Android Camera capture & System Video Picker inputs */}
+            <input
+              ref={cameraCaptureInputRef}
+              type="file"
+              accept="video/*"
+              capture="environment"
+              onChange={handleNativeFileChange('camera')}
+              className="hidden"
+              aria-hidden="true"
+              tabIndex={-1}
+            />
+            <input
+              ref={galleryPickerInputRef}
+              type="file"
+              accept="video/*"
+              onChange={handleNativeFileChange('gallery')}
+              className="hidden"
+              aria-hidden="true"
+              tabIndex={-1}
+            />
+
+            {/* Compact Animated Camera Shortcut */}
+            <button
+              type="button"
+              onClick={handleTopCameraClick}
+              aria-label="Open device camera to record video"
+              title="Record Video with Camera"
+              className="animate-vlogs-float group inline-flex flex-col items-center justify-center px-2 py-1 rounded-xl bg-gradient-to-br from-[#ff1b8d] to-[#ec0078] text-white shadow-[0_3px_12px_rgba(236,0,120,0.32)] hover:shadow-[0_4px_16px_rgba(236,0,120,0.45)] hover:scale-105 active:scale-90 transition-all duration-150 shrink-0"
+            >
+              <Camera className="w-3.5 h-3.5 text-white" strokeWidth={2.3} />
+              <span className="text-[9px] font-extrabold leading-none mt-0.5 tracking-tight">
+                {seniorMode ? 'کیمرہ' : 'Camera'}
+              </span>
+            </button>
+
+            {/* Compact Animated Gallery Shortcut */}
+            <button
+              type="button"
+              onClick={handleTopGalleryClick}
+              aria-label="Open device video gallery picker"
+              title="Select Video from Gallery"
+              className="animate-vlogs-float-delayed group inline-flex flex-col items-center justify-center px-2 py-1 rounded-xl bg-gradient-to-br from-[#fff0f7] to-[#fce7f3] text-[#ec0078] border border-pink-300/90 shadow-[0_2px_10px_rgba(236,0,120,0.16)] hover:border-[#ec0078] hover:scale-105 active:scale-90 transition-all duration-150 shrink-0"
+            >
+              <Images className="w-3.5 h-3.5 text-[#ec0078]" strokeWidth={2.3} />
+              <span className="text-[9px] font-extrabold leading-none mt-0.5 tracking-tight">
+                {seniorMode ? 'گیلری' : 'Gallery'}
+              </span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                soundService.playClick();
+                setSearchOpen((prev) => {
+                  if (prev) setSearchQuery('');
+                  return !prev;
+                });
+              }}
+              aria-label="Search videos"
+              className={`p-1.5 rounded-full transition-colors tap-bounce ${
+                searchOpen ? 'bg-pink-100 text-[#ec0078]' : 'text-slate-900 hover:bg-pink-50'
+              }`}
+            >
+              <Search className="w-[20px] h-[20px]" strokeWidth={2.2} />
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                soundService.playClick();
+                onOpenNotifications?.();
+              }}
+              aria-label="Notifications"
+              className="relative p-1.5 rounded-full text-slate-900 hover:bg-pink-50 transition-colors tap-bounce"
+            >
+              <Bell className="w-[20px] h-[20px]" strokeWidth={2.2} />
+              {unreadNotificationCount > 0 && (
+                <span className="absolute top-0 right-0 min-w-[18px] h-[18px] px-1 rounded-full bg-red-500 text-white text-[10px] font-black leading-none flex items-center justify-center border-2 border-white tabular-nums">
+                  {unreadNotificationCount > 9 ? '9+' : unreadNotificationCount}
+                </span>
+              )}
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                soundService.playClick();
+                onOpenProfile?.();
+              }}
+              aria-label="User profile"
+              className="w-8 h-8 rounded-full overflow-hidden ring-2 ring-pink-200 bg-gradient-to-br from-pink-100 to-rose-200 flex items-center justify-center shrink-0 tap-bounce"
+            >
+              {currentUser?.photoURL ? (
+                <img
+                  src={currentUser.photoURL}
+                  alt={currentUser.displayName || 'Profile'}
+                  className="w-full h-full object-cover"
+                />
+              ) : currentUser?.displayName ? (
+                <span className="text-xs font-extrabold text-[#ec0078]">{userInitial}</span>
+              ) : (
+                <User className="w-4 h-4 text-[#ec0078]" />
+              )}
+            </button>
           </div>
         </div>
-      ) : (
-        /* =========================================================================
-            VIEW B: VIDEO DISCOVERY WITH CATEGORY FILTER
-           ========================================================================= */
-        <div className="flex flex-col w-full space-y-4 max-w-xl mx-auto">
-          {/* Header Banner */}
-          <div className="bg-gradient-to-r from-pink-500 via-rose-500 to-pink-600 text-white p-4 shadow-md sm:rounded-b-3xl">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                {onBackToHome && (
-                  <button
-                    onClick={onBackToHome}
-                    className="p-1.5 rounded-xl bg-white/20 hover:bg-white/30 text-white tap-bounce shrink-0"
-                    title="Back to Home"
-                  >
-                    <ArrowLeft className="w-4 h-4" />
-                  </button>
-                )}
-                <div className="w-10 h-10 rounded-2xl bg-white/20 backdrop-blur-xs flex items-center justify-center text-xl shadow-inner shrink-0">
-                  🎬
-                </div>
-                <div>
-                  <h1 className={`font-black flex items-center gap-1.5 ${seniorMode ? 'text-2xl' : 'text-lg'}`}>
-                    {seniorMode ? 'ویڈیو لرننگ حب' : 'Watch & Learn'}
-                  </h1>
-                  <p className="text-xs text-pink-100 font-medium">
-                    Verified Family-Friendly Video Streams
-                  </p>
-                </div>
-              </div>
 
-              <div className="flex items-center gap-1 bg-white/20 backdrop-blur-xs px-2.5 py-1 rounded-xl text-xs font-black">
-                <Sparkles className="w-3.5 h-3.5 text-amber-200" />
-                <span>+25 Pts / video</span>
-              </div>
-            </div>
+        {/* Honest Camera Permission / Hardware Feedback Notice (only shown if camera denied or unavailable) */}
+        {mediaNotice && (
+          <div className="mx-4 mb-2 px-3 py-2 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 text-xs font-semibold flex items-start justify-between gap-2">
+            <span>{mediaNotice}</span>
+            <button
+              type="button"
+              onClick={() => setMediaNotice(null)}
+              aria-label="Dismiss notice"
+              className="p-0.5 text-rose-500 hover:text-rose-700 shrink-0"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        )}
 
-            {/* Search Input */}
-            <div className="mt-3 relative">
-              <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-pink-200" />
+        {/* Expandable Search Input Bar */}
+        {searchOpen && (
+          <div className="px-4 pb-2.5">
+            <div className="flex items-center gap-2 bg-pink-50/90 border border-pink-200 rounded-full px-3.5 py-2">
+              <Search className="w-4 h-4 text-[#ec0078] shrink-0" />
               <input
                 type="text"
+                autoFocus
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder={seniorMode ? 'ویڈیوز تلاش کریں...' : 'Search tutorials, crafts, science...'}
-                className="w-full pl-9 pr-8 py-2.5 rounded-2xl bg-white/20 placeholder-pink-200 text-white text-xs font-medium focus:outline-hidden focus:ring-2 focus:ring-white/40 border border-white/25"
+                placeholder="Search vlogs, creators, or categories..."
+                className="flex-1 bg-transparent text-sm text-slate-900 placeholder:text-rose-400 focus:outline-none"
               />
               {searchQuery && (
                 <button
+                  type="button"
                   onClick={() => setSearchQuery('')}
-                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-pink-200 hover:text-white text-xs font-bold"
+                  aria-label="Clear search"
+                  className="p-0.5 rounded-full text-rose-500 hover:bg-pink-100"
                 >
-                  ✕
+                  <X className="w-4 h-4" />
                 </button>
               )}
             </div>
           </div>
+        )}
 
-          {/* DYNAMIC CATEGORY FILTER PILLS - Empty categories are hidden */}
-          {dynamicCategories.length > 1 && (
-            <div className="px-4">
-              <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-none -mx-4 px-4">
-                {dynamicCategories.map((category) => {
-                  const isSelected = activeCategory === category;
-                  const icon = CATEGORY_ICON_MAP[category] || <Sparkles className="w-3.5 h-3.5" />;
-                  const count =
-                    category === 'All'
-                      ? approvedVideos.length
-                      : approvedVideos.filter((v) => v.category === category).length;
+        {/* Horizontally Scrollable Category Pills */}
+        <div className="px-4 pb-3 pt-0.5 flex items-center gap-2 overflow-x-auto no-scrollbar">
+          {VLOG_FEED_CATEGORIES.map((category) => {
+            const isActive = selectedCategory === category;
+            return (
+              <button
+                key={category}
+                type="button"
+                onClick={() => {
+                  soundService.playClick();
+                  light();
+                  setSelectedCategory(category);
+                }}
+                className={`px-5 py-2 rounded-full text-[13.5px] whitespace-nowrap transition-all shrink-0 tap-bounce ${
+                  isActive
+                    ? 'bg-[#ec0078] text-white font-bold shadow-xs'
+                    : 'bg-[#fce7f3] text-[#831843] font-semibold hover:bg-[#fbcfe8]'
+                }`}
+              >
+                {category}
+              </button>
+            );
+          })}
+        </div>
+      </header>
 
-                  return (
-                    <button
-                      key={category}
-                      onClick={() => {
-                        soundService.playClick();
-                        selection();
-                        setActiveCategory(category);
-                      }}
-                      className={`shrink-0 px-3.5 py-2 rounded-2xl text-xs font-black flex items-center gap-1.5 transition-all tap-bounce ${
-                        isSelected
-                          ? 'bg-pink-600 text-white shadow-md shadow-pink-600/20 scale-102'
-                          : 'bg-white text-slate-700 hover:bg-slate-100 border border-slate-200/90 shadow-2xs'
-                      }`}
-                    >
-                      <span>{icon}</span>
-                      <span>{category}</span>
-                      <span
-                        className={`text-[10px] font-bold px-1.5 py-0.2 rounded-full ${
-                          isSelected ? 'bg-white/25 text-white' : 'bg-slate-100 text-slate-500'
-                        }`}
-                      >
-                        {count}
-                      </span>
-                    </button>
-                  );
-                })}
+      {/* Main Vertical Video Feed */}
+      <main className="px-4 pt-1 space-y-5">
+        {loadingFeed && unifiedFeed.length === 0 ? (
+          <div className="space-y-5">
+            {[1, 2, 3].map((n) => (
+              <div key={n} className="animate-pulse space-y-2.5">
+                <div className="w-full aspect-video rounded-2xl bg-pink-50" />
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-full bg-pink-100 shrink-0" />
+                  <div className="flex-1 space-y-2">
+                    <div className="h-4 bg-pink-50 rounded w-3/4" />
+                    <div className="h-3 bg-slate-100 rounded w-1/2" />
+                  </div>
+                </div>
               </div>
-            </div>
-          )}
-
-          {/* User Custom Playlist Bar */}
-          <div className="px-4">
-            <PlaylistBar
-              playlists={playlists}
-              activePlaylistId={activePlaylistId}
-              onSelectPlaylist={(id: string | null) => {
-                soundService.playClick();
-                setActivePlaylistId(id);
-              }}
-              onPlayAll={(vids: VideoContent[]) => {
-                if (vids.length > 0) handleOpenVideo(vids[0]);
-              }}
-              onCreateNewPlaylist={(name: string, emoji?: string) => {
-                const created = playlistService.createPlaylist(name, emoji);
-                setPlaylists(playlistService.getPlaylists());
-                setActivePlaylistId(created.id);
-                soundService.playFanfare();
-              }}
-              onDeletePlaylist={(id: string) => {
-                playlistService.deletePlaylist(id);
-                setPlaylists(playlistService.getPlaylists());
-                if (activePlaylistId === id) setActivePlaylistId(null);
-                soundService.playClick();
-              }}
-              playlistVideos={playlistVideos}
-            />
+            ))}
           </div>
-
-
-          {/* Recently Watched Videos Strip */}
-          {historyVideos.length > 0 && !activePlaylistId && (
-            <div className="px-4">
-              <VideoHistory
-                historyVideos={historyVideos}
-                onSelectVideo={handleOpenVideo}
-                seniorMode={seniorMode}
-                onClearHistory={handleClearHistory}
-              />
+        ) : filteredVideos.length === 0 ? (
+          <div className="py-16 text-center space-y-3">
+            <div className="w-14 h-14 rounded-full bg-pink-50 text-[#ec0078] flex items-center justify-center mx-auto">
+              <Film className="w-7 h-7" />
             </div>
-          )}
+            <h3 className="text-base font-bold text-slate-900">No videos found</h3>
+            <p className="text-xs text-slate-500 max-w-xs mx-auto">
+              {searchQuery
+                ? `No results for "${searchQuery}". Try another keyword or clear your search.`
+                : `No videos available in ${selectedCategory} right now.`}
+            </p>
+            <button
+              type="button"
+              onClick={() => {
+                setSearchQuery('');
+                setSelectedCategory('All');
+              }}
+              className="px-5 py-2 rounded-full bg-[#ec0078] text-white text-xs font-bold tap-bounce"
+            >
+              Show All Videos
+            </button>
+          </div>
+        ) : (
+          filteredVideos.map((video) => {
+            const isMenuOpen = openMenuVideoId === video.id;
+            const isSaved = savedIds.includes(video.id);
 
-          {/* Video Grid or Friendly Empty State */}
-          <div className="px-4 space-y-3">
-            <div className="flex items-center justify-between text-xs text-slate-500 font-bold px-1">
-              <span>
-                {activeCategory === 'All' ? 'All Verified Videos' : activeCategory} ({filteredVideos.length})
-              </span>
-              <span className="text-[11px] text-pink-600 font-black">
-                Tap Any Video to Play
-              </span>
-            </div>
-
-            {approvedVideos.length === 0 ? (
-              /* If no videos exist at all, show friendly message */
-              <div className="p-8 text-center bg-white rounded-3xl border border-pink-100 shadow-xs space-y-3">
-                <div className="w-14 h-14 mx-auto rounded-3xl bg-pink-50 text-pink-500 flex items-center justify-center text-2xl shadow-inner">
-                  🎬
-                </div>
-                <h3 className="font-black text-slate-800 text-base">
-                  New videos are coming soon
-                </h3>
-                <p className="text-xs text-slate-500 max-w-sm mx-auto leading-relaxed">
-                  Our educational team is curating new safe video lessons. In the meantime, your daily quiz and tasks are active and ready!
-                </p>
-                <div className="pt-2 flex justify-center gap-2">
-                  <span className="px-3 py-1 bg-emerald-50 border border-emerald-200 text-emerald-700 rounded-xl text-xs font-bold">
-                    ✓ Daily Quiz Active
-                  </span>
-                  <span className="px-3 py-1 bg-sky-50 border border-sky-200 text-sky-700 rounded-xl text-xs font-bold">
-                    ✓ Tasks Active
-                  </span>
-                </div>
-              </div>
-            ) : filteredVideos.length === 0 ? (
-              <div className="p-8 text-center bg-white rounded-3xl border border-pink-100 shadow-xs space-y-3">
-                <div className="w-12 h-12 mx-auto rounded-2xl bg-pink-50 text-pink-500 flex items-center justify-center">
-                  <ShieldCheck className="w-6 h-6 text-pink-500" />
-                </div>
-                <h3 className="font-black text-slate-800 text-sm">New videos coming soon</h3>
-                <p className="text-xs text-slate-500 max-w-sm mx-auto leading-relaxed">
-                  No playable videos in &ldquo;{activeCategory}&rdquo; yet. New educational videos are coming soon!
-                </p>
+            return (
+              <article key={video.id} className="relative">
+                {/* Large Rounded 16:9 Thumbnail Card */}
                 <button
-                  onClick={() => {
-                    setSearchQuery('');
-                    setActiveCategory('All');
-                  }}
-                  className="px-4 py-2 bg-pink-600 hover:bg-pink-700 text-white rounded-xl text-xs font-bold tap-bounce"
+                  type="button"
+                  onClick={() => handleSelectVideo(video)}
+                  className="block w-full text-left group focus:outline-none"
                 >
-                  View All Videos
-                </button>
-              </div>
-            ) : (
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
-                {filteredVideos.map((video) => {
-                  const completed = isVideoCompleted(video.id);
+                  <div className="relative w-full aspect-video rounded-2xl overflow-hidden bg-slate-100 shadow-xs">
+                    <img
+                      src={video.thumbnail}
+                      alt={video.title}
+                      loading="lazy"
+                      onError={(e) => {
+                        e.currentTarget.src = DEFAULT_THUMBNAIL_FALLBACK;
+                      }}
+                      className="w-full h-full object-cover group-hover:scale-[1.02] transition-transform duration-300"
+                    />
 
-                  return (
-                    <div
-                      key={video.id}
-                      onClick={() => handleOpenVideo(video)}
-                      className="bg-white rounded-3xl overflow-hidden border border-slate-200/90 shadow-2xs hover:shadow-md hover:border-pink-300 transition-all cursor-pointer tap-bounce flex flex-col group"
-                    >
-                      {/* Video Thumbnail with Badges */}
-                      <div className="relative aspect-video w-full overflow-hidden bg-slate-900">
-                        <img
-                          src={video.thumbnail}
-                          alt={video.title}
-                          className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
-                          loading="lazy"
-                          onError={(e) => {
-                            // Guaranteed fallback thumbnail if image fails to load
-                            const target = e.currentTarget;
-                            const vId = video.videoId || extractYouTubeId(video.videoUrl || '');
-                            if (vId && !target.src.includes('hqdefault.jpg')) {
-                              target.src = `https://i.ytimg.com/vi/${vId}/hqdefault.jpg`;
-                            }
-                          }}
-                        />
+                    {/* Top-Right Duration Badge */}
+                    <span className="absolute top-2.5 right-2.5 bg-black/75 backdrop-blur-xs text-white text-[11px] font-bold px-2 py-0.5 rounded-md tabular-nums">
+                      {video.duration}
+                    </span>
 
-                        {/* Duration pill */}
-                        <span className="absolute bottom-2 right-2 px-2 py-0.5 rounded-md bg-black/75 text-white text-[10px] font-black backdrop-blur-xs">
-                          {video.duration || '3:30'}
-                        </span>
-
-                        {/* Points pill */}
-                        <span className="absolute top-2 left-2 px-2 py-0.5 rounded-full bg-amber-500 text-white text-[10px] font-black shadow flex items-center gap-1">
-                          <Sparkles className="w-3 h-3" />
-                          +{video.points || 25} Pts
-                        </span>
-
-                        {/* Completed pill */}
-                        {completed && (
-                          <span className="absolute top-2 right-2 w-6 h-6 rounded-full bg-emerald-500 text-white flex items-center justify-center shadow">
-                            <CheckCircle className="w-3.5 h-3.5" />
-                          </span>
-                        )}
-
-                        {/* Center Play Overlay */}
-                        <div className="absolute inset-0 bg-black/20 group-hover:bg-black/35 flex items-center justify-center transition-colors">
-                          <div className="w-11 h-11 rounded-full bg-white/95 text-pink-600 flex items-center justify-center shadow-lg group-hover:scale-115 transition-transform">
-                            <Play className="w-5 h-5 ml-0.5 fill-pink-600" />
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* Video Details */}
-                      <div className="p-3.5 flex flex-col justify-between flex-1 space-y-2">
-                        <div>
-                          <div className="flex items-center justify-between text-[10px] font-black text-pink-600 uppercase tracking-wider">
-                            <span>{video.category}</span>
-                            <span className="text-slate-400 font-semibold">{video.author}</span>
-                          </div>
-                          <h3 className="font-extrabold text-xs sm:text-sm text-slate-900 mt-1 line-clamp-2 leading-snug">
-                            {video.title}
-                          </h3>
-                        </div>
-
-                        <div className="pt-2 border-t border-slate-100 flex items-center justify-between text-[11px]">
-                          <span className="text-slate-500">10s Learning Goal</span>
-                          <span className="font-extrabold text-pink-600 group-hover:translate-x-0.5 transition-transform">
-                            Watch Now →
-                          </span>
-                        </div>
+                    {/* Centered Circular Play Button Overlay */}
+                    <div className="absolute inset-0 flex items-center justify-center">
+                      <div className="w-12 h-12 rounded-full bg-black/60 backdrop-blur-xs border border-white/25 flex items-center justify-center shadow-lg group-hover:scale-105 transition-transform">
+                        <Play className="w-5 h-5 text-white fill-white ml-0.5" />
                       </div>
                     </div>
-                  );
-                })}
-              </div>
-            )}
+                  </div>
+                </button>
+
+                {/* Video Metadata Row Below Thumbnail */}
+                <div className="flex items-start gap-3 mt-2.5">
+                  {/* Left Pink Play Channel Icon */}
+                  <button
+                    type="button"
+                    onClick={() => handleSelectVideo(video)}
+                    className="w-10 h-10 rounded-full bg-[#ec0078] flex items-center justify-center shrink-0 mt-0.5 shadow-xs overflow-hidden"
+                    aria-label={video.creator}
+                  >
+                    {video.creatorAvatar ? (
+                      <img
+                        src={video.creatorAvatar}
+                        alt={video.creator}
+                        className="w-full h-full object-cover"
+                      />
+                    ) : (
+                      <Play className="w-4 h-4 text-white fill-white ml-0.5" />
+                    )}
+                  </button>
+
+                  {/* Bold Title + Muted Metadata */}
+                  <button
+                    type="button"
+                    onClick={() => handleSelectVideo(video)}
+                    className="flex-1 min-w-0 text-left"
+                  >
+                    <h2 className="text-[15px] font-bold text-slate-900 leading-[1.3] line-clamp-2">
+                      {video.title}
+                    </h2>
+                    <p className="text-[12.5px] text-slate-500 mt-0.5 truncate">
+                      {video.creator} • {video.viewsLabel} • {video.uploadedAtLabel}
+                    </p>
+                  </button>
+
+                  {/* Three-Dot Action Menu */}
+                  <div className="relative shrink-0">
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        soundService.playClick();
+                        setOpenMenuVideoId(isMenuOpen ? null : video.id);
+                      }}
+                      aria-label="Video options"
+                      className="p-1.5 rounded-full text-slate-700 hover:bg-pink-50 transition-colors"
+                    >
+                      <MoreVertical className="w-5 h-5" />
+                    </button>
+
+                    {isMenuOpen && (
+                      <div
+                        onClick={(e) => e.stopPropagation()}
+                        className="absolute right-0 top-9 z-40 w-48 bg-white rounded-2xl shadow-xl border border-pink-100 py-1.5 overflow-hidden"
+                      >
+                        <button
+                          type="button"
+                          onClick={() => toggleSavePlaylist(video)}
+                          className="w-full px-3.5 py-2.5 text-left text-xs font-semibold text-slate-800 hover:bg-pink-50 flex items-center gap-2.5"
+                        >
+                          {isSaved ? (
+                            <BookmarkCheck className="w-4 h-4 text-[#ec0078]" />
+                          ) : (
+                            <Bookmark className="w-4 h-4 text-slate-600" />
+                          )}
+                          <span>{isSaved ? 'Saved in Playlist' : 'Add to Playlist'}</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => handleShareVideo(video)}
+                          className="w-full px-3.5 py-2.5 text-left text-xs font-semibold text-slate-800 hover:bg-pink-50 flex items-center gap-2.5"
+                        >
+                          <Share2 className="w-4 h-4 text-slate-600" />
+                          <span>Share</span>
+                        </button>
+
+                        {onOpenLiveCamera && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setOpenMenuVideoId(null);
+                              onOpenLiveCamera();
+                            }}
+                            className="w-full px-3.5 py-2.5 text-left text-xs font-semibold text-slate-800 hover:bg-pink-50 flex items-center gap-2.5"
+                          >
+                            <VideoIcon className="w-4 h-4 text-[#ec0078]" />
+                            <span>Record a Vlog</span>
+                          </button>
+                        )}
+
+                        {onOpenCommunityUpload && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setOpenMenuVideoId(null);
+                              onOpenCommunityUpload();
+                            }}
+                            className="w-full px-3.5 py-2.5 text-left text-xs font-semibold text-slate-800 hover:bg-pink-50 flex items-center gap-2.5"
+                          >
+                            <Film className="w-4 h-4 text-[#ec0078]" />
+                            <span>Upload Community Vlog</span>
+                          </button>
+                        )}
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setOpenMenuVideoId(null);
+                            setReportingVideo(video);
+                          }}
+                          className="w-full px-3.5 py-2.5 text-left text-xs font-semibold text-rose-600 hover:bg-rose-50 flex items-center gap-2.5"
+                        >
+                          <Flag className="w-4 h-4" />
+                          <span>Report Video</span>
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </article>
+            );
+          })
+        )}
+      </main>
+
+      {/* Report Video Modal */}
+      {reportingVideo && (
+        <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-xs flex items-end sm:items-center justify-center p-4">
+          <div className="bg-white rounded-3xl w-full max-w-md p-5 shadow-2xl space-y-4">
+            <div className="flex items-center justify-between">
+              <h3 className="font-bold text-base text-slate-900">Report Video</h3>
+              <button
+                type="button"
+                onClick={() => setReportingVideo(null)}
+                className="p-1.5 rounded-full hover:bg-slate-100 text-slate-500"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <p className="text-xs text-slate-500 line-clamp-1">{reportingVideo.title}</p>
+            <div className="space-y-2">
+              {VLOG_REPORT_REASONS.map((reason) => (
+                <button
+                  key={reason}
+                  type="button"
+                  onClick={() => setSelectedReportReason(reason)}
+                  className={`w-full text-left px-3.5 py-2.5 rounded-xl text-xs font-semibold border transition-colors capitalize ${
+                    selectedReportReason === reason
+                      ? 'border-[#ec0078] bg-pink-50 text-[#831843]'
+                      : 'border-slate-200 text-slate-700 hover:bg-slate-50'
+                  }`}
+                >
+                  {reason}
+                </button>
+              ))}
+            </div>
+            <button
+              type="button"
+              disabled={submittingReport}
+              onClick={handleSubmitReport}
+              className="w-full py-3 rounded-full bg-[#ec0078] text-white font-bold text-sm hover:bg-[#d1006a] disabled:opacity-60"
+            >
+              {submittingReport ? 'Submitting...' : 'Submit Report'}
+            </button>
           </div>
         </div>
       )}
 
-      {/* Add To Playlist Modal Dialog */}
-      {videoToAddToPlaylist && (
-        <AddToPlaylistModal
-          video={videoToAddToPlaylist}
-          playlists={playlists}
-          onPlaylistsChange={(updated) => setPlaylists(updated)}
-          onClose={() => setVideoToAddToPlaylist(null)}
-        />
+      {/* Toast Feedback */}
+      {toastMessage && (
+        <div className="fixed bottom-24 left-1/2 -translate-x-1/2 z-50 bg-slate-900 text-white text-xs font-bold px-4 py-2.5 rounded-full shadow-lg whitespace-nowrap">
+          {toastMessage}
+        </div>
       )}
     </div>
   );

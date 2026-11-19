@@ -14,6 +14,7 @@ import {
   PieChart,
   HelpCircle
 } from 'lucide-react';
+import { getConfiguredPointsPerDollar } from '../config/paymentConfig';
 import {
   MIN_ACTIVE_DAYS,
   REWARDS_DISCLAIMER_NOTICE,
@@ -129,7 +130,8 @@ export const DailyTasksCard: React.FC<DailyTasksCardProps> = ({
   const userPoolSharePoints = totalCommunityPoints > 0
     ? Math.round((qualifyingPoints / totalCommunityPoints) * MONTHLY_PRIZE_POOL_POINTS)
     : 0;
-  const userPoolShareDollars = (userPoolSharePoints / 1000).toFixed(2);
+  const activePointsPerDollar = getConfiguredPointsPerDollar();
+  const userPoolShareDollars = (userPoolSharePoints / activePointsPerDollar).toFixed(2);
   const userPoolSharePercent = totalCommunityPoints > 0
     ? ((qualifyingPoints / totalCommunityPoints) * 100).toFixed(2)
     : '0.00';
@@ -390,7 +392,7 @@ export const DailyTasksCard: React.FC<DailyTasksCardProps> = ({
                   <div className="flex justify-between">
                     <span>Current Month Rewards Pool:</span>
                     <span className="font-bold text-amber-600">
-                      {MONTHLY_PRIZE_POOL_POINTS.toLocaleString()} Pts (${(MONTHLY_PRIZE_POOL_POINTS / 1000).toFixed(2)})
+                      {MONTHLY_PRIZE_POOL_POINTS.toLocaleString()} Pts (${(MONTHLY_PRIZE_POOL_POINTS / activePointsPerDollar).toFixed(2)})
                     </span>
                   </div>
                 </div>

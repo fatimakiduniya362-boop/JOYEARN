@@ -2,7 +2,6 @@ import React, { useState, useEffect, useCallback } from 'react';
 import {
   Bell,
   Clock,
-  Sparkles,
   HelpCircle,
   CheckCircle2,
   Smartphone,
@@ -11,6 +10,12 @@ import {
 } from 'lucide-react';
 import { soundService } from '../services/soundService';
 import { hapticService } from '../services/haptics';
+import { getLocalDateKey } from '../services/learningStreakService';
+import {
+  getLocalNotificationPreferences,
+  evaluateNotificationDelivery,
+  recordDeliveredNotification,
+} from '../services/notificationPreferencesService';
 
 export interface DailyQuizNotificationProps {
   onOpenQuiz: () => void;
@@ -144,34 +149,46 @@ export const DailyQuizNotification: React.FC<DailyQuizNotificationProps> = ({
     }
   };
 
-  // Trigger push notification logic
+  // Trigger push notification logic (strictly gated by Notification Control Center preferences)
   const fireQuizReminderNotification = useCallback((isTest = false) => {
-    const todayStr = new Date().toISOString().slice(0, 10);
+    const now = new Date();
+    const todayStr = getLocalDateKey(now);
+    const prefs = getLocalNotificationPreferences();
+    const dedupeKey = isTest ? undefined : `daily_quiz_reminder_${todayStr}`;
+
+    const decision = evaluateNotificationDelivery({
+      prefs,
+      category: 'learning',
+      dedupeKey,
+      now,
+      bypassRateLimit: isTest,
+    });
+    if (!decision.allowed) return;
+
+    recordDeliveredNotification('learning', dedupeKey, now);
+
     const formattedTime = format12HourTime(reminderTime);
     const title = seniorMode
-      ? `🔔 روزانہ کوئز کا وقت (${formattedTime}): نیا 5 سوالات کا کوئز تیار ہے! 🧠`
-      : `🔔 Daily Quiz Reminder (${formattedTime}): Fresh 5 Questions Ready! 🧠`;
+      ? `روزانہ کوئز کا وقت (${formattedTime}): نیا 5 سوالات کا کوئز تیار ہے`
+      : `Daily Quiz Reminder (${formattedTime}): Fresh 5 Questions Ready`;
     const body = seniorMode
-      ? 'آج کے 5 نئے سوالات کا جواب دیں، اپنا اسٹریک برقرار رکھیں اور جوائے پوائنٹس کمائیں!'
-      : "Your daily 5-question quiz is waiting! Answer today's questions to protect your streak & earn JoyPoints.";
+      ? 'آج کے 5 نئے سوالات کا جواب دیں اور اپنا سیکھنے کا سلسلہ جاری رکھیں۔'
+      : "Your daily 5-question quiz is ready. Complete today's quiz to continue your learning streak.";
 
     // Audio chime & haptic
     soundService.playDailyGoalCheer();
     hapticService.success();
 
-    // Trigger in-app toast / history callback
+    // Trigger in-app toast / history callback (which also handles native notification & dedupe)
     if (onTriggerNotification) {
       onTriggerNotification(title, body, 'learn');
-    }
-
-    // Native Browser Push Notification
-    if (typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'granted') {
+    } else if (typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'granted') {
       try {
         const notif = new Notification(title, {
           body,
           icon: 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><text y=".9em" font-size="90">🧠</text></svg>',
           badge: 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><text y=".9em" font-size="90">⭐</text></svg>',
-          tag: 'joyearn-daily-quiz-reminder',
+          tag: dedupeKey || 'joyearn-daily-quiz-reminder',
         });
         notif.onclick = () => {
           window.focus();
@@ -198,17 +215,17 @@ export const DailyQuizNotification: React.FC<DailyQuizNotificationProps> = ({
     setTimeout(() => setTestSent(false), 3000);
   };
 
-  // Timer countdown updater & scheduled reminder trigger
+  // Timer countdown updater & scheduled reminder trigger (local timezone)
   useEffect(() => {
     const interval = setInterval(() => {
       const remainingReminder = getMsUntilReminderTime(reminderTime);
       setMsUntilReminder(remainingReminder);
       setMsUntilMidnight(getMsUntilMidnight());
 
-      // Check if current hour and minute match reminderTime
+      // Check if current local hour and minute match reminderTime
       const [targetH, targetM] = (reminderTime || '09:00').split(':').map((v) => parseInt(v, 10) || 0);
       const now = new Date();
-      const todayStr = now.toISOString().slice(0, 10);
+      const todayStr = getLocalDateKey(now);
       const lastNotified = localStorage.getItem('joyearn_last_quiz_reminder_notified');
 
       if (

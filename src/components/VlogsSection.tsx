@@ -3,12 +3,8 @@ import {
   X,
   Play,
   Plus,
-  Share2,
   Flag,
   ShieldCheck,
-  Sparkles,
-  ExternalLink,
-  ChevronRight,
   Info,
   CheckCircle2,
   Clock,
@@ -17,15 +13,11 @@ import {
   ArrowLeft,
   RefreshCw,
   Video,
-  Eye,
-  Filter,
   Upload,
-  Camera,
   Film,
-  FileVideo,
   Trash2,
-  Lock,
-  AlertTriangle,
+  Clapperboard,
+  Heart,
 } from 'lucide-react';
 import { AppUser, VideoContent } from '../types';
 import {
@@ -43,13 +35,21 @@ import {
   getSubmissionsCountToday,
   getPlayableVlogUrl,
   checkVlogContentSafety,
+  toggleVlogLike,
+  getUserLikedVlogIds,
 } from '../services/vlogService';
 import { generateVideoThumbnail, getVideoMetadata } from '../services/videoStorageService';
 import { CommunitySafetyModal } from './CommunitySafetyModal';
 import { soundService } from '../services/soundService';
 import { useHaptics } from '../hooks/useHaptics';
-import { adMobManager, NATIVE_AD_EVERY_N_ITEMS } from '../services/adMobService';
 import { WatchPage } from './WatchPage';
+import { ReelsViewer } from './ReelsViewer';
+import {
+  getDataSaverPreferences,
+  getNetworkProfile,
+  resolveVideoPlaybackPolicy,
+  buildYouTubeEmbedUrl,
+} from '../services/dataSaverService';
 
 interface VlogsSectionProps {
   isOpen: boolean;
@@ -65,6 +65,10 @@ interface VlogsSectionProps {
   watchedVideoIds?: string[];
   onCompleteVideo?: (videoId: string) => void;
   isModal?: boolean;
+  refreshTrigger?: number;
+  onOpenNotifications?: () => void;
+  onOpenProfile?: () => void;
+  unreadNotificationCount?: number;
 }
 
 export const VlogsSection: React.FC<VlogsSectionProps> = ({
@@ -81,23 +85,28 @@ export const VlogsSection: React.FC<VlogsSectionProps> = ({
   watchedVideoIds,
   onCompleteVideo,
   isModal = false,
+  refreshTrigger = 0,
+  onOpenNotifications,
+  onOpenProfile,
+  unreadNotificationCount = 0,
 }) => {
-  const { light, success, warning } = useHaptics();
+  const { success, warning } = useHaptics();
 
-  // Top Level Navigation: "Videos" (Watch catalog & categories) vs "Vlogs" (User community vlogs)
-  const [mainSection, setMainSection] = useState<'videos' | 'vlogs'>(initialTab || 'videos');
+  // Top Level Navigation: "videos" (redesigned pink-and-white Watch/Vlogs feed) vs "vlogs" (Community upload studio)
+  const [mainSection, setMainSection] = useState<'videos' | 'vlogs'>('videos');
 
   useEffect(() => {
-    if (initialTab) {
-      setMainSection(initialTab);
+    if (initialTab === 'videos' || initialTab === 'vlogs') {
+      setMainSection('videos');
     }
   }, [initialTab]);
 
-  const [activeTab, setActiveTab] = useState<'feed' | 'share' | 'myVlogs'>('feed');
+  const [activeTab, setActiveTab] = useState<'feed' | 'reels' | 'share' | 'myVlogs'>('feed');
+  const [selectedReelId, setSelectedReelId] = useState<string | null>(null);
   const [selectedCategory, setSelectedCategory] = useState<string>('All');
   const [vlogs, setVlogs] = useState<VlogItem[]>([]);
   const [loading, setLoading] = useState(false);
-  const [visibleCount, setVisibleCount] = useState(10);
+  const [visibleCount, setVisibleCount] = useState(16);
   const [activePlayingVlog, setActivePlayingVlog] = useState<VlogItem | null>(null);
   const [activePlayingNativeUrl, setActivePlayingNativeUrl] = useState<string | null>(null);
   const [failedEmbedIds, setFailedEmbedIds] = useState<Record<string, boolean>>({});
@@ -136,6 +145,8 @@ export const VlogsSection: React.FC<VlogsSectionProps> = ({
   const [selectedReportReason, setSelectedReportReason] = useState<VlogReportReason>('inappropriate clothing or content');
   const [reportSuccessMessage, setReportSuccessMessage] = useState<string | null>(null);
   const [blockedCreatorMessage, setBlockedCreatorMessage] = useState<string | null>(null);
+  const [likedIds, setLikedIds] = useState<Set<string>>(new Set());
+  const [likingId, setLikingId] = useState<string | null>(null);
 
   // Load feed on open or tab change
   const loadFeed = async (forceRefresh = false) => {
@@ -143,10 +154,47 @@ export const VlogsSection: React.FC<VlogsSectionProps> = ({
     try {
       const items = await getApprovedVlogs(forceRefresh);
       setVlogs(items);
+      if (currentUser?.uid && currentUser.uid !== 'guest' && items.length > 0) {
+        const userLikes = await getUserLikedVlogIds(
+          currentUser.uid,
+          items.map((v) => v.id)
+        );
+        setLikedIds(userLikes);
+      } else {
+        setLikedIds(new Set());
+      }
     } catch (e) {
       console.warn('Could not load vlogs:', e);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleToggleLike = async (vlog: VlogItem) => {
+    if (likingId === vlog.id) return;
+    if (!currentUser?.uid || currentUser.uid === 'guest') {
+      onOpenAuth?.();
+      return;
+    }
+    soundService.playClick();
+    setLikingId(vlog.id);
+    try {
+      const res = await toggleVlogLike(vlog.id, currentUser.uid);
+      if (!res.error) {
+        setLikedIds((prev) => {
+          const next = new Set(prev);
+          if (res.liked) next.add(vlog.id);
+          else next.delete(vlog.id);
+          return next;
+        });
+        setVlogs((prev) =>
+          prev.map((item) =>
+            item.id === vlog.id ? { ...item, likeCount: res.likeCount } : item
+          )
+        );
+      }
+    } finally {
+      setLikingId(null);
     }
   };
 
@@ -165,12 +213,12 @@ export const VlogsSection: React.FC<VlogsSectionProps> = ({
 
   useEffect(() => {
     if (isOpen) {
-      loadFeed();
+      loadFeed(refreshTrigger > 0);
       if (currentUser?.uid) {
         loadMySubmittedVlogs();
       }
     }
-  }, [isOpen, currentUser?.uid]);
+  }, [isOpen, currentUser?.uid, refreshTrigger]);
 
   // Resolve active playable URL for activePlayingVlog
   useEffect(() => {
@@ -256,6 +304,58 @@ export const VlogsSection: React.FC<VlogsSectionProps> = ({
     }
   };
 
+  // Handle direct video capture/selection from top-right Camera & Gallery shortcuts in WatchPage
+  const handleQuickVideoSelected = async (file: File, source: 'camera' | 'gallery') => {
+    setMainSection('vlogs');
+    setActiveTab('share');
+    soundService.playClick();
+    setFormError(null);
+
+    if (!file.type.startsWith('video/') && !/\.(mp4|webm|mov|m4v|ogg|ogv|3gp|mkv)$/i.test(file.name)) {
+      setFormError('Please select or record a valid video file (MP4, WebM, MOV, or 3GP).');
+      warning();
+      return;
+    }
+
+    const sizeMb = file.size / (1024 * 1024);
+    if (sizeMb > 150) {
+      setFormError(`Video file size (${sizeMb.toFixed(1)} MB) exceeds the 150 MB limit. Please choose a shorter video.`);
+      warning();
+      return;
+    }
+
+    setProcessingVideo(true);
+    try {
+      const metadata = await getVideoMetadata(file);
+      const thumbnail = await generateVideoThumbnail(file);
+      const previewUrl = URL.createObjectURL(file);
+
+      setNativeVideoFile(file);
+      setNativeVideoBlob(file);
+      setNativeVideoPreviewUrl(previewUrl);
+      setVideoDuration(metadata.formattedDuration);
+      setIsShortVideo(metadata.isShort);
+      setVideoSizeMb(metadata.sizeMb);
+      if (thumbnail) {
+        setCustomThumbnailUrl(thumbnail);
+      }
+      if (!vlogTitle.trim()) {
+        const defaultName =
+          source === 'camera'
+            ? `My Vlog ${new Date().toLocaleDateString()}`
+            : file.name.replace(/\.[^/.]+$/, '').replace(/[-_]/g, ' ').slice(0, 80);
+        setVlogTitle(defaultName);
+      }
+      success();
+    } catch (err: any) {
+      console.warn('Error processing selected video:', err);
+      setFormError('Could not process the selected video. Please try another video.');
+      warning();
+    } finally {
+      setProcessingVideo(false);
+    }
+  };
+
   const handleClearNativeVideo = () => {
     soundService.playClick();
     if (nativeVideoPreviewUrl && nativeVideoPreviewUrl.startsWith('blob:')) {
@@ -278,7 +378,12 @@ export const VlogsSection: React.FC<VlogsSectionProps> = ({
   // Launch camera with Community Safety Gate confirmation
   const handleLaunchCamera = () => {
     soundService.playClick();
-    const hasAgreed = localStorage.getItem('joyearn_camera_safety_acknowledged') === 'true';
+    let hasAgreed = false;
+    try {
+      hasAgreed = localStorage.getItem('joyearn_camera_safety_acknowledged') === 'true';
+    } catch {
+      hasAgreed = false;
+    }
     if (!hasAgreed) {
       setShowSafetyGateModal(true);
     } else {
@@ -307,6 +412,13 @@ export const VlogsSection: React.FC<VlogsSectionProps> = ({
     return filteredVlogs.slice(0, visibleCount);
   }, [filteredVlogs, visibleCount]);
 
+  // Approved Reels (short vertical clips or fallback to approved vlogs if none marked short)
+  const reelVlogs = useMemo(() => {
+    const valid = vlogs.filter((v) => !failedEmbedIds[v.id]);
+    const shorts = valid.filter((v) => v.isShort);
+    return shorts.length > 0 ? shorts : valid;
+  }, [vlogs, failedEmbedIds]);
+
   if (!isOpen) return null;
 
   // Handle Share Submission
@@ -326,7 +438,7 @@ export const VlogsSection: React.FC<VlogsSectionProps> = ({
 
     // Require either a native video (uploaded or recorded) OR an optional YouTube link
     if (!hasYt && !hasNative) {
-      setFormError('Please attach a video from your gallery, record with your camera, or enter an optional YouTube link.');
+      setFormError('Please attach a video from your device or enter an optional YouTube link.');
       warning();
       return;
     }
@@ -428,74 +540,68 @@ export const VlogsSection: React.FC<VlogsSectionProps> = ({
 
   if (!isOpen) return null;
 
-  const content = (
-    <div
-      className={`w-full max-w-lg bg-slate-900 text-white flex flex-col relative ${
-        isModal
-          ? 'h-[92vh] rounded-3xl overflow-hidden shadow-2xl border border-slate-800'
-          : 'min-h-screen pb-28 shadow-xl border-x border-slate-800'
-      }`}
-    >
-      {/* =========================================================================
-          PRIMARY TWO TABS AT THE TOP: "Videos" vs "Vlogs"
-         ========================================================================= */}
-      <div className="p-2 sm:p-2.5 bg-slate-950 border-b border-slate-800 flex items-center justify-between gap-2 shrink-0">
-        <div className="flex-1 flex items-center gap-1.5 p-1 bg-slate-900 rounded-2xl border border-slate-800/80">
+  const content =
+    mainSection === 'videos' ? (
+      <div
+        className={`w-full max-w-lg bg-white text-slate-900 flex flex-col relative ${
+          isModal
+            ? 'h-[92vh] rounded-3xl overflow-y-auto shadow-2xl border border-pink-100'
+            : 'min-h-screen'
+        }`}
+      >
+        <WatchPage
+          videos={videos}
+          onEarnPoints={onEarnPoints || (() => {})}
+          onToggleOffline={onToggleOffline}
+          seniorMode={seniorMode}
+          watchedVideoIds={watchedVideoIds}
+          onCompleteVideo={onCompleteVideo}
+          onBackToHome={onClose}
+          currentUser={currentUser}
+          onOpenNotifications={onOpenNotifications}
+          onOpenProfile={onOpenProfile}
+          unreadNotificationCount={unreadNotificationCount}
+          onOpenLiveCamera={onOpenLiveCamera}
+          onQuickVideoSelected={handleQuickVideoSelected}
+          onOpenCommunityUpload={() => {
+            setMainSection('vlogs');
+            setActiveTab('share');
+          }}
+        />
+      </div>
+    ) : (
+      <div
+        className={`w-full max-w-lg bg-slate-900 text-white flex flex-col relative ${
+          isModal
+            ? 'h-[92vh] rounded-3xl overflow-hidden shadow-2xl border border-slate-800'
+            : 'min-h-screen pb-28 shadow-xl border-x border-slate-800'
+        }`}
+      >
+        {/* Return to Vlogs Feed bar when inside Community Upload view */}
+        <div className="p-2.5 bg-slate-950 border-b border-slate-800 flex items-center justify-between gap-2 shrink-0">
           <button
+            type="button"
             onClick={() => {
               soundService.playClick();
               setMainSection('videos');
             }}
-            className={`flex-1 py-2 px-3 rounded-xl text-xs font-black flex items-center justify-center gap-1.5 transition-all tap-bounce ${
-              mainSection === 'videos'
-                ? 'bg-gradient-to-r from-pink-500 to-rose-600 text-white shadow-md'
-                : 'text-slate-400 hover:text-white'
-            }`}
+            className="px-3 py-1.5 rounded-xl bg-white/10 hover:bg-white/20 text-white text-xs font-bold flex items-center gap-1.5 tap-bounce"
           >
-            <Play className="w-3.5 h-3.5 fill-current" />
-            <span>{seniorMode ? 'ویڈیوز' : 'Videos'}</span>
+            <ArrowLeft className="w-3.5 h-3.5" />
+            <span>Back to Watch Feed</span>
           </button>
           <button
             onClick={() => {
               soundService.playClick();
-              setMainSection('vlogs');
+              onClose();
             }}
-            className={`flex-1 py-2 px-3 rounded-xl text-xs font-black flex items-center justify-center gap-1.5 transition-all tap-bounce ${
-              mainSection === 'vlogs'
-                ? 'bg-gradient-to-r from-rose-600 to-pink-600 text-white shadow-md'
-                : 'text-slate-400 hover:text-white'
-            }`}
+            className="w-9 h-9 rounded-2xl bg-white/10 hover:bg-white/20 flex items-center justify-center text-white tap-bounce shrink-0"
+            title="Back to Home"
           >
-            <Video className="w-3.5 h-3.5" />
-            <span>{seniorMode ? 'کمیونٹی وی لاگز' : 'Vlogs'}</span>
+            <X className="w-4 h-4" />
           </button>
         </div>
 
-        <button
-          onClick={() => {
-            soundService.playClick();
-            onClose();
-          }}
-          className="w-9 h-9 rounded-2xl bg-white/10 hover:bg-white/20 flex items-center justify-center text-white tap-bounce shrink-0"
-          title="Back to Home"
-        >
-          <X className="w-4 h-4" />
-        </button>
-      </div>
-
-      {mainSection === 'videos' ? (
-        <div className="flex-1 overflow-y-auto bg-slate-50 dark:bg-slate-900 text-slate-900 dark:text-slate-100">
-          <WatchPage
-            videos={videos}
-            onEarnPoints={onEarnPoints || (() => {})}
-            onToggleOffline={onToggleOffline}
-            seniorMode={seniorMode}
-            watchedVideoIds={watchedVideoIds}
-            onCompleteVideo={onCompleteVideo}
-            onBackToHome={onClose}
-          />
-        </div>
-      ) : (
         <div className="flex-1 flex flex-col min-h-0">
           {/* =========================================================================
               HEADER BAR FOR VLOGS
@@ -530,6 +636,21 @@ export const VlogsSection: React.FC<VlogsSectionProps> = ({
               <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
               <span className="hidden sm:inline">Rules</span>
             </button>
+
+            {onOpenLiveCamera && (
+              <button
+                type="button"
+                onClick={() => {
+                  soundService.playClick();
+                  onOpenLiveCamera();
+                }}
+                className="px-3 py-1.5 rounded-xl text-xs font-black bg-white text-rose-600 hover:bg-pink-50 border border-pink-200 flex items-center gap-1.5 tap-bounce shadow-sm"
+                title="Open Vlogs Camera"
+              >
+                <Video className="w-3.5 h-3.5" />
+                <span>Record</span>
+              </button>
+            )}
 
             <button
               onClick={() => {
@@ -567,22 +688,43 @@ export const VlogsSection: React.FC<VlogsSectionProps> = ({
         )}
 
         {/* =========================================================================
-            TABS: FEED / MY VLOGS / SHARE A VLOG
+            TABS: FEED / REELS / MY VLOGS
            ========================================================================= */}
-        <div className="flex items-center justify-between px-4 py-2 bg-slate-950 border-b border-slate-800/80 text-xs shrink-0">
-          <div className="flex items-center gap-2">
+        <div className="flex items-center justify-between px-4 py-2 bg-slate-950 border-b border-slate-800/80 text-xs shrink-0 gap-2">
+          <div className="flex items-center gap-1.5 overflow-x-auto scrollbar-none">
             <button
               onClick={() => {
                 soundService.playClick();
                 setActiveTab('feed');
               }}
-              className={`px-3 py-1.5 rounded-xl font-extrabold transition-all tap-bounce ${
+              className={`px-3 py-1.5 rounded-xl font-extrabold transition-all tap-bounce whitespace-nowrap ${
                 activeTab === 'feed'
                   ? 'bg-rose-600 text-white shadow-xs'
                   : 'text-slate-400 hover:text-white'
               }`}
             >
-              Feed
+              {seniorMode ? 'فیڈ' : 'Feed'}
+            </button>
+            <button
+              onClick={() => {
+                soundService.playClick();
+                setActivePlayingVlog(null);
+                setSelectedReelId(null);
+                setActiveTab('reels');
+              }}
+              className={`px-3 py-1.5 rounded-xl font-extrabold transition-all tap-bounce flex items-center gap-1.5 whitespace-nowrap ${
+                activeTab === 'reels'
+                  ? 'bg-gradient-to-r from-pink-600 to-rose-600 text-white shadow-xs'
+                  : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              <Clapperboard className="w-3.5 h-3.5" />
+              <span>{seniorMode ? 'ریلز' : 'Reels'}</span>
+              {reelVlogs.length > 0 && (
+                <span className="text-[10px] font-mono tabular-nums opacity-85">
+                  ({reelVlogs.length})
+                </span>
+              )}
             </button>
             <button
               onClick={() => {
@@ -594,13 +736,13 @@ export const VlogsSection: React.FC<VlogsSectionProps> = ({
                 setActiveTab('myVlogs');
                 loadMySubmittedVlogs();
               }}
-              className={`px-3 py-1.5 rounded-xl font-extrabold transition-all tap-bounce flex items-center gap-1.5 ${
+              className={`px-3 py-1.5 rounded-xl font-extrabold transition-all tap-bounce flex items-center gap-1.5 whitespace-nowrap ${
                 activeTab === 'myVlogs'
                   ? 'bg-rose-600 text-white shadow-xs'
                   : 'text-slate-400 hover:text-white'
               }`}
             >
-              <span>My Vlogs</span>
+              <span>{seniorMode ? 'میرے وی لاگز' : 'My Vlogs'}</span>
               {myVlogs.length > 0 && (
                 <span className="w-4 h-4 rounded-full bg-white/20 text-[10px] font-mono flex items-center justify-center">
                   {myVlogs.length}
@@ -609,16 +751,36 @@ export const VlogsSection: React.FC<VlogsSectionProps> = ({
             </button>
           </div>
 
-          <div className="text-[11px] text-slate-400 flex items-center gap-1">
+          <div className="text-[11px] text-slate-400 flex items-center gap-1 shrink-0">
             <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
-            <span>All-Ages Protected</span>
+            <span className="hidden sm:inline">All-Ages Protected</span>
           </div>
         </div>
 
         {/* =========================================================================
             BODY CONTENT
            ========================================================================= */}
-        <div className="flex-1 overflow-y-auto p-4 space-y-4">
+        <div className={`flex-1 overflow-y-auto ${activeTab === 'reels' ? 'p-2 sm:p-3' : 'p-4 space-y-4'}`}>
+          {/* =====================================================================
+              VIEW 0: REELS (Vertical Snap-Scroll Short Video Feed)
+             ===================================================================== */}
+          {activeTab === 'reels' && (
+            <ReelsViewer
+              reels={reelVlogs}
+              currentUser={currentUser}
+              seniorMode={seniorMode}
+              initialReelId={selectedReelId}
+              onReportVlog={(vlog) => setReportingVlog(vlog)}
+              onBlockCreator={handleBlockCreator}
+              onCreateReel={() => {
+                setIsShortVideo(true);
+                setActiveTab('share');
+              }}
+              onOpenCamera={handleLaunchCamera}
+              onOpenAuth={onOpenAuth}
+              onEarnPoints={onEarnPoints}
+            />
+          )}
           {/* =====================================================================
               VIEW 1: FEED OF APPROVED VLOGS
              ===================================================================== */}
@@ -673,27 +835,42 @@ export const VlogsSection: React.FC<VlogsSectionProps> = ({
                     </button>
                   </div>
                   <div className="aspect-video w-full rounded-2xl overflow-hidden bg-black shadow-inner border border-slate-800 flex items-center justify-center">
-                    {activePlayingNativeUrl || (activePlayingVlog.videoType && activePlayingVlog.videoType !== 'youtube') ? (
-                      <video
-                        src={activePlayingNativeUrl || activePlayingVlog.videoUrl}
-                        controls
-                        autoPlay
-                        playsInline
-                        className="w-full h-full object-contain bg-black"
-                      />
-                    ) : activePlayingVlog.videoId ? (
-                      <iframe
-                        src={`https://www.youtube-nocookie.com/embed/${activePlayingVlog.videoId}?rel=0&autoplay=1&modestbranding=1`}
-                        title={activePlayingVlog.title}
-                        className="w-full h-full border-0"
-                        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
-                        allowFullScreen
-                        onError={() => {
-                          setFailedEmbedIds((prev) => ({ ...prev, [activePlayingVlog.id]: true }));
-                          setActivePlayingVlog(null);
-                        }}
-                      />
-                    ) : (
+                    {activePlayingNativeUrl || (activePlayingVlog.videoType && activePlayingVlog.videoType !== 'youtube') ? (() => {
+                      const vlogPolicy = resolveVideoPlaybackPolicy(
+                        getDataSaverPreferences(),
+                        getNetworkProfile(),
+                        'direct_file'
+                      );
+                      return (
+                        <video
+                          src={activePlayingNativeUrl || activePlayingVlog.videoUrl}
+                          controls
+                          preload={vlogPolicy.preloadMode}
+                          autoPlay={vlogPolicy.shouldAutoplay}
+                          playsInline
+                          className="w-full h-full object-contain bg-black"
+                        />
+                      );
+                    })() : activePlayingVlog.videoId ? (() => {
+                      const ytPolicy = resolveVideoPlaybackPolicy(
+                        getDataSaverPreferences(),
+                        getNetworkProfile(),
+                        'youtube'
+                      );
+                      return (
+                        <iframe
+                          src={buildYouTubeEmbedUrl(activePlayingVlog.videoId, ytPolicy)}
+                          title={activePlayingVlog.title}
+                          className="w-full h-full border-0"
+                          allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                          allowFullScreen
+                          onError={() => {
+                            setFailedEmbedIds((prev) => ({ ...prev, [activePlayingVlog.id]: true }));
+                            setActivePlayingVlog(null);
+                          }}
+                        />
+                      );
+                    })() : (
                       <div className="p-4 text-center text-slate-400 text-xs">
                         Video source unavailable or loading
                       </div>
@@ -727,9 +904,7 @@ export const VlogsSection: React.FC<VlogsSectionProps> = ({
                 </div>
               ) : (
                 <div className="space-y-4">
-                  {displayedVlogs.map((vlog, idx) => {
-                    const isEvery4th = (idx + 1) % NATIVE_AD_EVERY_N_ITEMS === 0;
-
+                  {displayedVlogs.map((vlog) => {
                     return (
                       <React.Fragment key={vlog.id}>
                         {/* Vlog Card */}
@@ -794,19 +969,62 @@ export const VlogsSection: React.FC<VlogsSectionProps> = ({
                               )}
                             </div>
 
-                            <div className="flex items-center justify-between text-xs pt-1 border-t border-slate-900">
-                              <div className="flex items-center gap-2">
-                                <div className="w-6 h-6 rounded-full bg-gradient-to-tr from-purple-500 to-indigo-500 flex items-center justify-center text-[10px] font-black text-white">
-                                  {vlog.creatorName.charAt(0).toUpperCase()}
-                                </div>
-                                <span className="font-bold text-slate-300 text-[11px] truncate max-w-[130px]">
+                            <div className="flex items-center justify-between text-xs pt-2 border-t border-slate-900 gap-2">
+                              <div className="flex items-center gap-2 min-w-0">
+                                {vlog.creatorPhotoURL ? (
+                                  <img
+                                    src={vlog.creatorPhotoURL}
+                                    alt={vlog.creatorName}
+                                    className="w-6 h-6 rounded-full object-cover border border-pink-400/40 shrink-0"
+                                    referrerPolicy="no-referrer"
+                                  />
+                                ) : (
+                                  <div className="w-6 h-6 rounded-full bg-gradient-to-tr from-rose-500 to-pink-500 flex items-center justify-center text-[10px] font-black text-white shrink-0">
+                                    {(vlog.creatorName || 'V').charAt(0).toUpperCase()}
+                                  </div>
+                                )}
+                                <span className="font-bold text-slate-200 text-[11px] truncate max-w-[110px]">
                                   {vlog.creatorName}
                                 </span>
                               </div>
 
-                              {/* Actions: Report & Block */}
-                              <div className="flex items-center gap-2">
+                              {/* Actions: Real Synchronized Like + Reel + Report + Block */}
+                              <div className="flex items-center gap-2 shrink-0">
                                 <button
+                                  type="button"
+                                  disabled={likingId === vlog.id}
+                                  onClick={() => handleToggleLike(vlog)}
+                                  className={`px-2 py-1 rounded-full flex items-center gap-1 text-[11px] font-black transition-all tap-bounce ${
+                                    likedIds.has(vlog.id)
+                                      ? 'bg-rose-600/20 text-rose-400 border border-rose-500/40'
+                                      : 'bg-slate-900 text-slate-300 hover:text-rose-400 border border-slate-800'
+                                  }`}
+                                  title={likedIds.has(vlog.id) ? 'Unlike video' : 'Like video'}
+                                >
+                                  <Heart
+                                    className={`w-3.5 h-3.5 ${likedIds.has(vlog.id) ? 'fill-rose-500 text-rose-500' : ''}`}
+                                  />
+                                  <span className="tabular-nums">{vlog.likeCount || 0}</span>
+                                </button>
+
+                                {vlog.isShort && (
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      soundService.playClick();
+                                      setSelectedReelId(vlog.id);
+                                      setActiveTab('reels');
+                                    }}
+                                    className="text-[11px] text-pink-400 hover:text-pink-300 flex items-center gap-1 font-bold transition-colors"
+                                    title="Open in Reels player"
+                                  >
+                                    <Clapperboard className="w-3 h-3" />
+                                    <span>Reel</span>
+                                  </button>
+                                )}
+
+                                <button
+                                  type="button"
                                   onClick={() => setReportingVlog(vlog)}
                                   className="text-[11px] text-slate-400 hover:text-rose-400 flex items-center gap-1 font-semibold transition-colors"
                                   title="Report safety concern"
@@ -814,14 +1032,14 @@ export const VlogsSection: React.FC<VlogsSectionProps> = ({
                                   <Flag className="w-3 h-3" />
                                   <span>Report</span>
                                 </button>
-                                <span className="text-slate-700">•</span>
+
                                 <button
+                                  type="button"
                                   onClick={() => handleBlockCreator(vlog.uid, vlog.creatorName)}
                                   className="text-[11px] text-slate-400 hover:text-amber-400 flex items-center gap-1 font-semibold transition-colors"
                                   title="Hide all vlogs from this creator"
                                 >
                                   <Ban className="w-3 h-3" />
-                                  <span>Block Creator</span>
                                 </button>
                               </div>
                             </div>
@@ -945,8 +1163,8 @@ export const VlogsSection: React.FC<VlogsSectionProps> = ({
                     </div>
                   </div>
                 ) : (
-                  /* Video Input Buttons */
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                  /* Video Input Button (Device File Upload) */
+                  <div className="grid grid-cols-1 gap-2.5">
                     {/* Device Gallery Upload Button */}
                     <button
                       type="button"
@@ -962,23 +1180,7 @@ export const VlogsSection: React.FC<VlogsSectionProps> = ({
                       </div>
                       <div className="min-w-0">
                         <h6 className="font-black text-xs text-white">Upload from Device</h6>
-                        <p className="text-[10px] text-slate-400">Select MP4, MOV, or WebM</p>
-                      </div>
-                    </button>
-
-                    {/* Camera Recording Button */}
-                    <button
-                      type="button"
-                      disabled={processingVideo}
-                      onClick={handleLaunchCamera}
-                      className="p-3.5 bg-gradient-to-r from-pink-950/40 to-rose-950/40 hover:from-pink-900/40 hover:to-rose-900/40 border border-rose-800/40 hover:border-rose-500/60 rounded-2xl flex items-center gap-3 text-left tap-bounce transition-all disabled:opacity-50"
-                    >
-                      <div className="w-10 h-10 rounded-xl bg-rose-500/10 border border-rose-500/20 text-rose-400 flex items-center justify-center shrink-0">
-                        <Camera className="w-5 h-5" />
-                      </div>
-                      <div className="min-w-0">
-                        <h6 className="font-black text-xs text-white">Record with Camera</h6>
-                        <p className="text-[10px] text-rose-300/80">In-app camera studio</p>
+                        <p className="text-[10px] text-slate-400">Select MP4, MOV, or WebM from your files</p>
                       </div>
                     </button>
                   </div>
@@ -1024,6 +1226,45 @@ export const VlogsSection: React.FC<VlogsSectionProps> = ({
 
               {/* The Form */}
               <form onSubmit={handleSubmitVlog} className="space-y-4">
+                {/* 0. Format Toggle: Standard Vlog vs Short Reel */}
+                <div className="space-y-1.5">
+                  <label className="text-xs font-black text-slate-200 block">
+                    {seniorMode ? 'ویڈیو فارمیٹ' : 'Post Format'}
+                  </label>
+                  <div className="grid grid-cols-2 gap-1.5 p-1 bg-slate-950 rounded-2xl border border-slate-800">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        soundService.playClick();
+                        setIsShortVideo(false);
+                      }}
+                      className={`py-2 px-3 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-colors ${
+                        !isShortVideo
+                          ? 'bg-slate-800 text-white shadow-xs'
+                          : 'text-slate-400 hover:text-white'
+                      }`}
+                    >
+                      <Video className="w-3.5 h-3.5" />
+                      <span>Standard Vlog</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        soundService.playClick();
+                        setIsShortVideo(true);
+                      }}
+                      className={`py-2 px-3 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-colors ${
+                        isShortVideo
+                          ? 'bg-gradient-to-r from-pink-600 to-rose-600 text-white shadow-xs'
+                          : 'text-slate-400 hover:text-white'
+                      }`}
+                    >
+                      <Clapperboard className="w-3.5 h-3.5" />
+                      <span>Short Reel (≤60s)</span>
+                    </button>
+                  </div>
+                </div>
+
                 {/* 1. YouTube Link (COMPLETELY OPTIONAL) */}
                 <div className="space-y-1.5">
                   <div className="flex items-center justify-between text-xs">
@@ -1163,7 +1404,11 @@ export const VlogsSection: React.FC<VlogsSectionProps> = ({
                     disabled={submitting || processingVideo}
                     className="w-full py-3.5 bg-gradient-to-r from-rose-600 to-pink-600 hover:brightness-110 text-white font-black text-xs rounded-2xl shadow-lg tap-bounce transition-all disabled:opacity-50"
                   >
-                    {submitting ? 'Submitting & Verifying...' : 'Submit Vlog for Approval'}
+                    {submitting
+                      ? 'Submitting & Verifying...'
+                      : isShortVideo
+                      ? 'Submit Reel for Approval'
+                      : 'Submit Vlog for Approval'}
                   </button>
                 )}
               </form>
@@ -1224,7 +1469,9 @@ export const VlogsSection: React.FC<VlogsSectionProps> = ({
                       <div className="flex-1 min-w-0 space-y-1">
                         <h4 className="font-black text-xs text-white truncate">{item.title}</h4>
                         <div className="flex items-center gap-2 text-[10px] text-slate-400">
-                          <span className="uppercase font-bold text-pink-400">{item.category}</span>
+                          <span className="uppercase font-bold text-pink-400">
+                            {item.isShort ? 'Reel' : 'Vlog'} · {item.category}
+                          </span>
                           <span>•</span>
                           <span>{new Date(item.createdAt).toLocaleDateString()}</span>
                         </div>
@@ -1265,7 +1512,6 @@ export const VlogsSection: React.FC<VlogsSectionProps> = ({
           )}
         </div>
       </div>
-    )}
 
       {/* =========================================================================
           REPORT MODAL DIALOG

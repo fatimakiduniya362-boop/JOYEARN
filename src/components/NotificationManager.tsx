@@ -1,20 +1,24 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
-  Bell,
   BellRing,
-  Clock,
   Gift,
   CheckCircle2,
-  AlertCircle,
   X,
   Volume2,
   VolumeX,
-  Smartphone,
-  ExternalLink,
-  ShieldCheck,
-  Sparkles
 } from 'lucide-react';
-import { DailyQuizNotification } from './DailyQuizNotification';
+import { NotificationControlPanel } from './NotificationControlPanel';
+import { loadReminderPrefs } from '../services/engagementService';
+import {
+  NotificationCategory,
+  NotificationPreferences,
+  getLocalNotificationPreferences,
+  loadNotificationPreferences,
+  subscribeNotificationPreferences,
+  evaluateNotificationDelivery,
+  recordDeliveredNotification,
+} from '../services/notificationPreferencesService';
+import { getLocalDateKey } from '../services/learningStreakService';
 
 export interface NotificationItem {
   id: string;
@@ -34,6 +38,10 @@ interface NotificationManagerProps {
   seniorMode: boolean;
   isOpen: boolean;
   onClose: () => void;
+  onUnreadCountChange?: (count: number) => void;
+  streakDays?: number;
+  userUid?: string;
+  isLearningSessionActive?: boolean;
 }
 
 // Play gentle web audio synth chime
@@ -71,48 +79,126 @@ export const NotificationManager: React.FC<NotificationManagerProps> = ({
   seniorMode,
   isOpen,
   onClose,
+  onUnreadCountChange,
+  streakDays = 0,
+  userUid,
+  isLearningSessionActive = false,
 }) => {
-  // Notification permission state
-  const [browserPermission, setBrowserPermission] = useState<NotificationPermission>(() => {
-    if (typeof window !== 'undefined' && 'Notification' in window) {
-      return Notification.permission;
-    }
-    return 'default';
-  });
-
-  // Settings
-  const [enableChestReminder, setEnableChestReminder] = useState(true);
-  const [enableTaskReminder, setEnableTaskReminder] = useState(true);
-  const [enableSound, setEnableSound] = useState(true);
-  const [reminderIntervalMinutes, setReminderIntervalMinutes] = useState(30);
-  const [dailyReminderTime, setDailyReminderTime] = useState<string>(() => {
+  // Real Notification Control Center preferences (synced with Firestore per account)
+  const [notifPrefs, setNotifPrefs] = useState<NotificationPreferences>(() =>
+    getLocalNotificationPreferences(userUid)
+  );
+  const [notificationsEnabled, setNotificationsEnabled] = useState<boolean>(
+    () => getLocalNotificationPreferences(userUid).masterEnabled
+  );
+  const [enableSound, setEnableSound] = useState<boolean>(() => {
     try {
-      return localStorage.getItem('joyearn_daily_reminder_time') || '09:00';
+      return localStorage.getItem('joyearn_notif_sound') !== 'false';
     } catch {
-      return '09:00';
+      return true;
     }
   });
+  const [dailyReminderEnabled] = useState<boolean>(
+    () => loadReminderPrefs().dailyReminderEnabled
+  );
+  const [dailyReminderTime] = useState<string>(
+    () => loadReminderPrefs().dailyReminderTime
+  );
+  const [streakRiskReminderEnabled] = useState<boolean>(
+    () => loadReminderPrefs().streakRiskReminderEnabled
+  );
 
-  // Active in-app banner toast
+  // Load & subscribe to per-account notification preferences from Firestore/local
+  useEffect(() => {
+    let active = true;
+    loadNotificationPreferences(userUid).then(({ prefs }) => {
+      if (!active) return;
+      setNotifPrefs(prefs);
+      setNotificationsEnabled(prefs.masterEnabled);
+    });
+    const unsubscribe = subscribeNotificationPreferences((updated) => {
+      setNotifPrefs(updated);
+      setNotificationsEnabled(updated.masterEnabled);
+    });
+    return () => {
+      active = false;
+      unsubscribe();
+    };
+  }, [userUid]);
+
+  // Active in-app banner toast & persisted notification history
   const [activeToast, setActiveToast] = useState<NotificationItem | null>(null);
-  const [history, setHistory] = useState<NotificationItem[]>([
-    {
-      id: 'n-init-1',
-      title: 'Welcome to JoyEarn!',
-      body: 'Your daily streak is waiting. Open your chest to claim free rewards.',
-      actionType: 'chest',
-      timestamp: 'Just now',
-      read: false,
-    },
-  ]);
+  const [history, setHistory] = useState<NotificationItem[]>(() => {
+    try {
+      const raw = localStorage.getItem('joyearn_notif_history');
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) return parsed;
+      }
+    } catch {}
+    return [
+      {
+        id: 'n-init-1',
+        title: 'Welcome to JoyEarn!',
+        body: 'Your daily streak is waiting. Open your chest to claim free rewards.',
+        actionType: 'chest',
+        timestamp: 'Just now',
+        read: false,
+      },
+    ];
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('joyearn_notif_history', JSON.stringify(history));
+    } catch {}
+  }, [history]);
+
+  // Sync live unread notification count with header Bell icon
+  useEffect(() => {
+    if (!notificationsEnabled) {
+      onUnreadCountChange?.(0);
+      return;
+    }
+    const unreadHistoryCount = history.filter((item) => !item.read).length;
+    onUnreadCountChange?.(unreadHistoryCount);
+  }, [history, notificationsEnabled, onUnreadCountChange]);
 
   // Background minimized detector
   const backgroundTimerRef = useRef<any>(null);
   const originalTitleRef = useRef<string>(typeof document !== 'undefined' ? document.title : 'JoyEarn');
 
-  // Trigger a reminder
+  // Trigger a notification only if allowed by user's Notification Control Center rules
   const triggerNotification = useCallback(
-    (title: string, body: string, actionType: 'chest' | 'tasks' | 'learn') => {
+    (
+      title: string,
+      body: string,
+      actionType: 'chest' | 'tasks' | 'learn',
+      options?: {
+        category?: NotificationCategory;
+        dedupeKey?: string;
+        bypassRateLimit?: boolean;
+      }
+    ) => {
+      const category: NotificationCategory =
+        options?.category ||
+        (actionType === 'learn' ? 'learning' : 'tasks');
+
+      const dedupeKey =
+        options?.dedupeKey || `${category}:${actionType}:${title.slice(0, 60)}`;
+
+      const decision = evaluateNotificationDelivery({
+        prefs: notifPrefs,
+        category,
+        dedupeKey,
+        isLearningSessionActive,
+        bypassRateLimit: options?.bypassRateLimit,
+      });
+
+      if (!decision.allowed) return;
+
+      recordDeliveredNotification(category, dedupeKey);
+
       const newItem: NotificationItem = {
         id: `notif-${Date.now()}`,
         title,
@@ -130,16 +216,21 @@ export const NotificationManager: React.FC<NotificationManagerProps> = ({
         playChimeSound();
       }
 
-      // If document is hidden, change title to flash alert
+      // If document is hidden, update title
       if (document.hidden) {
-        document.title = `(1) 🔔 ${title} - JoyEarn`;
+        document.title = `(1) ${title} - JoyEarn`;
       }
 
-      // Try native Web Notification if supported & granted
-      if (typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'granted') {
+      // Respect real Android / Web notification permission (never send system popup if denied)
+      if (
+        typeof window !== 'undefined' &&
+        'Notification' in window &&
+        Notification.permission === 'granted'
+      ) {
         try {
           const n = new Notification(title, {
             body,
+            tag: dedupeKey,
             icon: 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><text y=".9em" font-size="90">🎁</text></svg>',
             badge: 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><text y=".9em" font-size="90">⭐</text></svg>',
           });
@@ -150,57 +241,66 @@ export const NotificationManager: React.FC<NotificationManagerProps> = ({
             if (actionType === 'learn') onOpenLearn();
             n.close();
           };
-        } catch (e) {
+        } catch {
           // Native notifications might be restricted in some iframes
         }
       }
     },
-    [enableSound, onOpenChest, onOpenTasks, onOpenLearn]
+    [notifPrefs, isLearningSessionActive, enableSound, onOpenChest, onOpenTasks, onOpenLearn]
   );
 
-  // Request browser permission
-  const handleRequestPermission = async () => {
-    if (typeof window === 'undefined' || !('Notification' in window)) {
-      try {
-        alert('Browser notifications are not supported in this browser environment. In-app banner alerts will be used.');
-      } catch {}
-      return;
-    }
+  // Optional 1/day chosen-time reminder (local timezone, respects quiet/preferred hours & dedupe)
+  useEffect(() => {
+    if (!notifPrefs.masterEnabled) return;
+    const checkReminders = () => {
+      const now = new Date();
+      const todayKey = getLocalDateKey(now);
+      const currentHHMM = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
 
-    try {
-      const res = await Notification.requestPermission();
-      setBrowserPermission(res);
-      if (res === 'granted') {
-        triggerNotification('Notifications Enabled! 🎉', 'You will receive reminders when new tasks or daily chests arrive.', 'chest');
+      // 1) Optional single daily learning reminder at user's chosen local time
+      if (dailyReminderEnabled && notifPrefs.newLearningContent && currentHHMM >= dailyReminderTime) {
+        triggerNotification(
+          'Daily Learning Reminder',
+          'Your daily theme and quiz are ready whenever you have a moment.',
+          'learn',
+          { category: 'learning', dedupeKey: `daily_learning_${todayKey}` }
+        );
       }
-    } catch (err) {
-      console.warn('Error requesting notification permission:', err);
-    }
-  };
 
-  // Monitor visibility change (User minimizes app or switches tab)
+      // 2) Optional evening streak reminder (after 19:00 local time, max 1/day)
+      if (
+        streakRiskReminderEnabled &&
+        notifPrefs.newLearningContent &&
+        streakDays > 0 &&
+        !claimedChestToday &&
+        now.getHours() >= 19
+      ) {
+        triggerNotification(
+          'Keep Your Learning Streak Going',
+          `Complete a quick lesson or quiz to maintain your ${streakDays}-day streak.`,
+          'learn',
+          { category: 'learning', dedupeKey: `streak_evening_${todayKey}` }
+        );
+      }
+    };
+
+    checkReminders();
+    const interval = setInterval(checkReminders, 60000);
+    return () => clearInterval(interval);
+  }, [
+    notifPrefs,
+    dailyReminderEnabled,
+    dailyReminderTime,
+    streakRiskReminderEnabled,
+    streakDays,
+    claimedChestToday,
+    triggerNotification,
+  ]);
+
+  // Restore document title when user returns to the app (no spammy background timers)
   useEffect(() => {
     const handleVisibilityChange = () => {
-      if (document.hidden) {
-        // App is minimized or tab is switched
-        // Schedule reminder after 4 seconds of inactivity if chest is unclaimed or tasks pending
-        backgroundTimerRef.current = setTimeout(() => {
-          if (!claimedChestToday && enableChestReminder) {
-            triggerNotification(
-              '🎁 Daily Chest Unopened!',
-              'Your daily streak reward is waiting! Tap to claim your points and garden seed.',
-              'chest'
-            );
-          } else if (uncompletedTasksCount > 0 && enableTaskReminder) {
-            triggerNotification(
-              '📝 Approved Tasks Waiting!',
-              `You have ${uncompletedTasksCount} eligible tasks ready to earn points.`,
-              'tasks'
-            );
-          }
-        }, 4000);
-      } else {
-        // User came back to the app
+      if (!document.hidden) {
         if (backgroundTimerRef.current) {
           clearTimeout(backgroundTimerRef.current);
         }
@@ -213,29 +313,7 @@ export const NotificationManager: React.FC<NotificationManagerProps> = ({
       document.removeEventListener('visibilitychange', handleVisibilityChange);
       if (backgroundTimerRef.current) clearTimeout(backgroundTimerRef.current);
     };
-  }, [claimedChestToday, uncompletedTasksCount, enableChestReminder, enableTaskReminder, triggerNotification]);
-
-  // Periodic reminder simulation timer (e.g. checks every reminderIntervalMinutes)
-  useEffect(() => {
-    const intervalMs = Math.max(15000, reminderIntervalMinutes * 60 * 1000);
-    const timer = setInterval(() => {
-      if (!claimedChestToday && enableChestReminder) {
-        triggerNotification(
-          '⭐ Friendly Reminder: Daily Chest',
-          'Keep your streak active! Claim your daily reward chest before the day ends.',
-          'chest'
-        );
-      } else if (uncompletedTasksCount > 0 && enableTaskReminder) {
-        triggerNotification(
-          '🎯 Earn Extra JoyPoints Today!',
-          `Complete available educational activities to unlock new perks and badges.`,
-          'tasks'
-        );
-      }
-    }, intervalMs);
-
-    return () => clearInterval(timer);
-  }, [claimedChestToday, uncompletedTasksCount, enableChestReminder, enableTaskReminder, reminderIntervalMinutes, triggerNotification]);
+  }, []);
 
   // Auto-dismiss in-app toast after 6 seconds
   useEffect(() => {
@@ -247,25 +325,32 @@ export const NotificationManager: React.FC<NotificationManagerProps> = ({
     }
   }, [activeToast]);
 
-  const handleToastClick = () => {
-    if (!activeToast) return;
-    const type = activeToast.actionType;
-    setActiveToast(null);
+  const navigateByAction = (type: 'chest' | 'tasks' | 'learn') => {
+    onClose();
     if (type === 'chest') onOpenChest();
     if (type === 'tasks') onOpenTasks();
     if (type === 'learn') onOpenLearn();
   };
 
+  const handleToastClick = () => {
+    if (!activeToast) return;
+    const item = activeToast;
+    setHistory((prev) => prev.map((h) => (h.id === item.id ? { ...h, read: true } : h)));
+    setActiveToast(null);
+    navigateByAction(item.actionType);
+  };
+
+  const handleAlertRowClick = (item: NotificationItem) => {
+    setHistory((prev) => prev.map((h) => (h.id === item.id ? { ...h, read: true } : h)));
+    navigateByAction(item.actionType);
+  };
+
+  const handleMarkAllRead = () => {
+    setHistory((prev) => prev.map((h) => ({ ...h, read: true })));
+  };
+
   return (
     <>
-      {/* Background Midnight 12:00 AM Quiz Notification Scheduler (Always Active) */}
-      <div className="hidden" aria-hidden="true">
-        <DailyQuizNotification
-          onOpenQuiz={onOpenLearn}
-          seniorMode={seniorMode}
-          onTriggerNotification={triggerNotification}
-        />
-      </div>
 
       {/* FLOATING IN-APP TOAST BANNER OVERLAY */}
       {activeToast && (
@@ -300,219 +385,166 @@ export const NotificationManager: React.FC<NotificationManagerProps> = ({
 
       {/* NOTIFICATION SETTINGS & LOG MODAL */}
       {isOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-3">
-          <div className="bg-white rounded-3xl w-full max-w-md max-h-[92vh] flex flex-col shadow-2xl overflow-hidden border-4 border-amber-300">
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-3"
+          onClick={onClose}
+        >
+          <div
+            className="bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 rounded-3xl w-full max-w-md max-h-[92vh] flex flex-col shadow-2xl overflow-hidden border border-rose-200 dark:border-slate-700"
+            onClick={(e) => e.stopPropagation()}
+          >
             {/* Header */}
-            <div className="bg-gradient-to-r from-amber-500 via-orange-500 to-pink-500 p-4 text-white flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <div className="w-10 h-10 rounded-2xl bg-white/20 flex items-center justify-center text-xl">
-                  🔔
+            <div className="bg-gradient-to-r from-rose-500 via-pink-500 to-rose-600 p-4 text-white flex items-center justify-between shrink-0">
+              <div className="flex items-center gap-2.5">
+                <div className="w-10 h-10 rounded-2xl bg-white/20 flex items-center justify-center shrink-0">
+                  <BellRing className="w-5 h-5 text-white" />
                 </div>
                 <div>
-                  <h2 className={`font-bold flex items-center gap-1.5 ${seniorMode ? 'text-2xl' : 'text-lg'}`}>
-                    Reminders & Alerts
+                  <h2 className={`font-bold flex items-center gap-1.5 ${seniorMode ? 'text-xl' : 'text-lg'}`}>
+                    {seniorMode ? 'اطلاعات اور یاد دہانی' : 'Notifications & Controls'}
                   </h2>
-                  <p className="text-xs text-amber-100">Never miss your daily rewards & new tasks</p>
+                  <p className="text-xs text-rose-100">
+                    {seniorMode ? 'اپنی اطلاعات اور پرسکون اوقات کا انتظام کریں' : 'Manage categories, quiet hours & alerts'}
+                  </p>
                 </div>
               </div>
               <button
                 onClick={onClose}
-                className="w-8 h-8 rounded-full bg-white/20 hover:bg-white/30 flex items-center justify-center text-white font-bold"
+                className="min-w-[40px] min-h-[40px] rounded-full bg-white/20 hover:bg-white/30 flex items-center justify-center text-white font-bold transition-colors"
+                aria-label="Close notifications"
               >
-                ✕
+                <X className="w-4 h-4" />
               </button>
             </div>
 
             {/* Modal Body */}
             <div className="flex-1 overflow-y-auto p-4 space-y-4">
-              {/* Browser Permission Banner */}
-              <div className="bg-amber-50 border border-amber-200 rounded-2xl p-3.5 space-y-2">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2 text-xs font-bold text-amber-950">
-                    <Smartphone className="w-4 h-4 text-amber-700" />
-                    <span>Browser Notification Permission</span>
-                  </div>
-                  <span
-                    className={`text-[10px] font-black px-2 py-0.5 rounded-full uppercase ${
-                      browserPermission === 'granted'
-                        ? 'bg-emerald-100 text-emerald-800'
-                        : browserPermission === 'denied'
-                        ? 'bg-rose-100 text-rose-800'
-                        : 'bg-amber-100 text-amber-800'
-                    }`}
-                  >
-                    {browserPermission}
+              {/* Live Actionable Reminders (Active Tasks & Chest) */}
+              {(!claimedChestToday || uncompletedTasksCount > 0) && (
+                <div className="space-y-2">
+                  <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 px-1 block">
+                    {seniorMode ? 'آج کے فعال کام' : 'Active Today'}
                   </span>
+                  {!claimedChestToday && (
+                    <button
+                      type="button"
+                      onClick={() => navigateByAction('chest')}
+                      className="w-full text-left bg-amber-50 dark:bg-amber-950/40 hover:bg-amber-100/80 dark:hover:bg-amber-950/60 border border-amber-200 dark:border-amber-800/60 rounded-2xl p-3 flex items-center gap-3 transition-colors"
+                    >
+                      <div className="w-9 h-9 rounded-xl bg-amber-500/15 text-amber-600 dark:text-amber-400 flex items-center justify-center shrink-0">
+                        <Gift className="w-5 h-5" />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="text-xs font-bold text-slate-900 dark:text-white">
+                          {seniorMode ? 'روزانہ خزانہ تیار ہے' : 'Daily Streak Chest Unclaimed'}
+                        </div>
+                        <p className="text-[11px] text-slate-600 dark:text-slate-300">
+                          Tap to claim today&apos;s streak bonus points
+                        </p>
+                      </div>
+                    </button>
+                  )}
+                  {uncompletedTasksCount > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => navigateByAction('tasks')}
+                      className="w-full text-left bg-indigo-50 dark:bg-indigo-950/40 hover:bg-indigo-100/80 dark:hover:bg-indigo-950/60 border border-indigo-200 dark:border-indigo-800/60 rounded-2xl p-3 flex items-center gap-3 transition-colors"
+                    >
+                      <div className="w-9 h-9 rounded-xl bg-indigo-500/15 text-indigo-600 dark:text-indigo-400 flex items-center justify-center shrink-0">
+                        <CheckCircle2 className="w-5 h-5" />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="text-xs font-bold text-slate-900 dark:text-white tabular-nums">
+                          {uncompletedTasksCount} {seniorMode ? 'ٹاسک باقی ہیں' : 'Daily Tasks Remaining'}
+                        </div>
+                        <p className="text-[11px] text-slate-600 dark:text-slate-300">
+                          Tap to view and earn JoyPoints
+                        </p>
+                      </div>
+                    </button>
+                  )}
                 </div>
-                <p className="text-[11px] text-amber-800 leading-relaxed">
-                  {browserPermission === 'granted'
-                    ? 'Active! You will receive system notifications even when the app is minimized or backgrounded.'
-                    : 'Enable browser permission so JoyEarn can alert you when new tasks or daily streak chests are available.'}
-                </p>
-                {browserPermission !== 'granted' && (
-                  <button
-                    onClick={handleRequestPermission}
-                    className="w-full py-2 bg-amber-500 hover:bg-amber-600 text-white rounded-xl text-xs font-bold tap-bounce shadow-sm"
-                  >
-                    Enable Browser Notifications
-                  </button>
-                )}
-              </div>
+              )}
 
-              {/* Dedicated Daily 5-Question Quiz 12:00 AM Push Notification Component */}
-              <DailyQuizNotification
-                onOpenQuiz={() => {
-                  onClose();
-                  onOpenLearn();
-                }}
-                seniorMode={seniorMode}
-                onTriggerNotification={triggerNotification}
-              />
+              {/* Unified Smart Notification Control Center (synced with Settings & Firestore) */}
+              <NotificationControlPanel userUid={userUid} isUrdu={seniorMode} />
 
-              {/* Daily Reminder Time Picker */}
-              <div className="bg-white border border-gray-200 rounded-2xl p-3.5 space-y-2">
-                <div className="flex items-center justify-between text-xs">
+              {/* Gentle In-App Chime Sound */}
+              <div className="bg-white dark:bg-slate-800/70 border border-slate-200 dark:border-slate-700 rounded-2xl p-3">
+                <label className="flex items-center justify-between text-xs cursor-pointer">
                   <div>
-                    <span className="font-bold text-gray-900 flex items-center gap-1.5">
-                      <Clock className="w-3.5 h-3.5 text-indigo-600" />
-                      <span>{seniorMode ? 'روزانہ یاد دہانی کا وقت' : 'Daily Reminder Time'}</span>
-                    </span>
-                    <p className="text-[11px] text-gray-500">
-                      {seniorMode ? 'اپنے پسندیدہ وقت پر روزانہ کوئز اور بونس کی یاد دہانی حاصل کریں' : 'Choose what time you want your daily quiz & streak reminder'}
-                    </p>
-                  </div>
-                  <input
-                    type="time"
-                    value={dailyReminderTime}
-                    onChange={(e) => {
-                      setDailyReminderTime(e.target.value);
-                      localStorage.setItem('joyearn_daily_reminder_time', e.target.value);
-                    }}
-                    className="px-2.5 py-1.5 border border-slate-300 rounded-xl text-xs font-bold text-slate-800 bg-slate-50 focus:outline-hidden focus:border-indigo-500"
-                  />
-                </div>
-              </div>
-
-              {/* Toggles & Options */}
-              <div className="bg-white border border-gray-200 rounded-2xl p-3.5 space-y-3">
-                <h4 className="font-bold text-xs text-gray-800 uppercase tracking-wider">
-                  Reminder Preferences
-                </h4>
-
-                {/* Daily Chest Alert */}
-                <div className="flex items-center justify-between text-xs">
-                  <div>
-                    <span className="font-bold text-gray-900 flex items-center gap-1.5">
-                      <span>🎁</span> Daily Chest Reminders
-                    </span>
-                    <p className="text-[11px] text-gray-500">Alert me if my daily streak chest is unclaimed</p>
-                  </div>
-                  <input
-                    type="checkbox"
-                    checked={enableChestReminder}
-                    onChange={(e) => setEnableChestReminder(e.target.checked)}
-                    className="w-4 h-4 text-amber-500 rounded focus:ring-amber-400"
-                  />
-                </div>
-
-                {/* New Tasks Alert */}
-                <div className="flex items-center justify-between text-xs border-t border-gray-100 pt-2.5">
-                  <div>
-                    <span className="font-bold text-gray-900 flex items-center gap-1.5">
-                      <span>📝</span> New Tasks & Surveys
-                    </span>
-                    <p className="text-[11px] text-gray-500">Alert me when approved tasks are waiting</p>
-                  </div>
-                  <input
-                    type="checkbox"
-                    checked={enableTaskReminder}
-                    onChange={(e) => setEnableTaskReminder(e.target.checked)}
-                    className="w-4 h-4 text-amber-500 rounded focus:ring-amber-400"
-                  />
-                </div>
-
-                {/* Sound Chime */}
-                <div className="flex items-center justify-between text-xs border-t border-gray-100 pt-2.5">
-                  <div>
-                    <span className="font-bold text-gray-900 flex items-center gap-1.5">
-                      {enableSound ? <Volume2 className="w-3.5 h-3.5 text-amber-600" /> : <VolumeX className="w-3.5 h-3.5 text-gray-400" />}
+                    <span className="font-bold text-slate-800 dark:text-white flex items-center gap-1.5">
+                      {enableSound ? <Volume2 className="w-3.5 h-3.5 text-rose-500" /> : <VolumeX className="w-3.5 h-3.5 text-slate-400" />}
                       <span>Gentle Chime Sound</span>
                     </span>
-                    <p className="text-[11px] text-gray-500">Play a pleasant sound with in-app reminders</p>
+                    <p className="text-[10px] text-slate-500 dark:text-slate-400">Play a soft chime with allowed in-app alerts</p>
                   </div>
                   <input
                     type="checkbox"
                     checked={enableSound}
-                    onChange={(e) => setEnableSound(e.target.checked)}
-                    className="w-4 h-4 text-amber-500 rounded focus:ring-amber-400"
+                    onChange={(e) => {
+                      const val = e.target.checked;
+                      setEnableSound(val);
+                      try { localStorage.setItem('joyearn_notif_sound', String(val)); } catch {}
+                    }}
+                    className="w-4 h-4 accent-rose-500 rounded cursor-pointer"
                   />
-                </div>
-              </div>
-
-              {/* Instant Test Buttons */}
-              <div className="bg-gradient-to-r from-pink-50 to-amber-50 border border-pink-200 rounded-2xl p-3.5 space-y-2">
-                <span className="font-bold text-xs text-gray-800 block">Test Your Reminders</span>
-                <div className="grid grid-cols-2 gap-2">
-                  <button
-                    onClick={() => {
-                      triggerNotification(
-                        '🎁 Daily Chest Ready!',
-                        'Your daily chest reward is waiting. Tap to claim points and flowers!',
-                        'chest'
-                      );
-                    }}
-                    className="py-2 px-3 bg-white border border-amber-300 rounded-xl text-xs font-bold text-amber-900 hover:bg-amber-100 tap-bounce shadow-xs"
-                  >
-                    Test In-App Toast
-                  </button>
-
-                  <button
-                    onClick={() => {
-                      triggerNotification(
-                        '📱 Minimized App Alert!',
-                        'You switched away, but JoyEarn is keeping your streak safe!',
-                        'tasks'
-                      );
-                    }}
-                    className="py-2 px-3 bg-white border border-pink-300 rounded-xl text-xs font-bold text-pink-900 hover:bg-pink-100 tap-bounce shadow-xs"
-                  >
-                    Test Minimized Alert
-                  </button>
-                </div>
-                <p className="text-[10px] text-gray-500 text-center">
-                  Tip: Switch to another browser tab or minimize to see the automatic background reminder trigger.
-                </p>
+                </label>
               </div>
 
               {/* Notification History Log */}
               <div>
-                <h4 className="font-bold text-xs text-gray-800 mb-2 flex items-center justify-between">
+                <h4 className="font-bold text-xs text-gray-800 dark:text-slate-200 mb-2 flex items-center justify-between">
                   <span>Recent Alerts ({history.length})</span>
-                  <button
-                    onClick={() => setHistory([])}
-                    className="text-[10px] text-gray-400 hover:text-gray-600 underline"
-                  >
-                    Clear History
-                  </button>
+                  <div className="flex items-center gap-3">
+                    {history.some((h) => !h.read) && (
+                      <button
+                        onClick={handleMarkAllRead}
+                        className="text-[10px] text-indigo-600 dark:text-indigo-400 hover:underline font-bold"
+                      >
+                        Mark all read
+                      </button>
+                    )}
+                    {history.length > 0 && (
+                      <button
+                        onClick={() => setHistory([])}
+                        className="text-[10px] text-gray-400 hover:text-gray-600 dark:hover:text-slate-200 underline"
+                      >
+                        Clear History
+                      </button>
+                    )}
+                  </div>
                 </h4>
                 <div className="space-y-2">
-                  {history.map((item) => (
-                    <div
-                      key={item.id}
-                      className="bg-gray-50 p-2.5 rounded-xl border border-gray-200 flex items-start gap-2.5 text-xs"
-                    >
-                      <span className="text-base mt-0.5">
-                        {item.actionType === 'chest' ? '🎁' : item.actionType === 'tasks' ? '📝' : '🧠'}
-                      </span>
-                      <div className="flex-1 min-w-0">
-                        <div className="flex justify-between items-center">
-                          <span className="font-bold text-gray-900 truncate">{item.title}</span>
-                          <span className="text-[10px] text-gray-400 shrink-0">{item.timestamp}</span>
-                        </div>
-                        <p className="text-[11px] text-gray-600 mt-0.5">{item.body}</p>
-                      </div>
+                  {history.length === 0 ? (
+                    <div className="p-4 text-center text-xs text-slate-400 bg-gray-50 dark:bg-slate-800/50 rounded-xl border border-gray-200 dark:border-slate-700">
+                      All caught up! No recent alerts.
                     </div>
-                  ))}
+                  ) : (
+                    history.map((item) => (
+                      <button
+                        key={item.id}
+                        type="button"
+                        onClick={() => handleAlertRowClick(item)}
+                        className={`w-full text-left p-2.5 rounded-xl border flex items-start gap-2.5 text-xs transition-colors ${
+                          item.read
+                            ? 'bg-gray-50 dark:bg-slate-800/40 border-gray-200 dark:border-slate-700/70 opacity-80'
+                            : 'bg-amber-50/70 dark:bg-amber-950/30 border-amber-200 dark:border-amber-800/60'
+                        }`}
+                      >
+                        <span className="text-base mt-0.5">
+                          {item.actionType === 'chest' ? '🎁' : item.actionType === 'tasks' ? '📝' : '🧠'}
+                        </span>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex justify-between items-center gap-2">
+                            <span className="font-bold text-gray-900 dark:text-white truncate">{item.title}</span>
+                            <span className="text-[10px] text-gray-400 shrink-0">{item.timestamp}</span>
+                          </div>
+                          <p className="text-[11px] text-gray-600 dark:text-slate-300 mt-0.5">{item.body}</p>
+                        </div>
+                      </button>
+                    ))
+                  )}
                 </div>
               </div>
             </div>

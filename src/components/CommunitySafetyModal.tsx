@@ -31,7 +31,9 @@ export const CommunitySafetyModal: React.FC<CommunitySafetyModalProps> = ({
     if (onAgree) {
       onAgree();
     }
-    onClose();
+    if (!onConfirm && !onAgree) {
+      onClose();
+    }
   };
 
   return (

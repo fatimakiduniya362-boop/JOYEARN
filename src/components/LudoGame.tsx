@@ -1,21 +1,44 @@
-import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   Sparkles,
   Trophy,
   RotateCcw,
   Volume2,
   VolumeX,
-  Users,
-  Bot,
   Zap,
-  Shield,
   Star,
-  Flame,
   ArrowLeft,
   ChevronRight,
-  Info
+  SlidersHorizontal,
+  WifiOff,
+  Play,
+  Trash2,
 } from 'lucide-react';
 import { soundService } from '../services/soundService';
+import {
+  PlayerColor,
+  Token,
+  PlayerInfo,
+  LudoGameMode,
+  LudoMatchState,
+  TRACK_COORDS,
+  SAFE_INDICES,
+  HOME_RUNWAYS,
+  YARD_TOKEN_SVG_COORDS,
+  HOME_FINISH_SLOTS,
+  createInitialLudoMatch,
+  getTokenBoardGridCoords,
+  beginDiceRoll,
+  applyDiceRoll,
+  advanceToNextTurn,
+  applyTokenMove,
+  chooseBestBotToken,
+  saveLudoMatchState,
+  loadSavedLudoMatchState,
+  clearSavedLudoMatchState,
+} from '../services/ludoEngine';
+
+export type { PlayerColor, Token, PlayerInfo };
 
 export interface LudoGameProps {
   onEarnPoints: (points: number, reason: string) => void;
@@ -24,153 +47,6 @@ export interface LudoGameProps {
   onTriggerConfetti?: () => void;
 }
 
-export type PlayerColor = 'red' | 'green' | 'yellow' | 'blue';
-
-export interface Token {
-  id: number; // 0..3
-  color: PlayerColor;
-  step: number; // -1 = in Yard, 0 = Start, 1..50 = Common track, 51..55 = Home stretch, 56 = Home (Won)
-}
-
-export interface PlayerInfo {
-  color: PlayerColor;
-  name: string;
-  avatar: string;
-  isBot: boolean;
-  tokens: Token[];
-  hasWon: boolean;
-  rank?: number;
-}
-
-// 52 common path track coordinates (row, col) in a 15x15 grid (0-indexed)
-// Standard clockwise layout starting at Red start (6, 1)
-const TRACK_COORDS: [number, number][] = [
-  [6, 0],   // 0
-  [6, 1],   // 1  - RED START (Safe ⭐)
-  [6, 2],   // 2
-  [6, 3],   // 3
-  [6, 4],   // 4
-  [6, 5],   // 5
-  [5, 6],   // 6
-  [4, 6],   // 7
-  [3, 6],   // 8
-  [2, 6],   // 9  - SAFE ⭐
-  [1, 6],   // 10
-  [0, 6],   // 11
-  [0, 7],   // 12
-  [0, 8],   // 13
-  [1, 8],   // 14 - GREEN START (Safe ⭐)
-  [2, 8],   // 15
-  [3, 8],   // 16
-  [4, 8],   // 17
-  [5, 8],   // 18
-  [6, 9],   // 19
-  [6, 10],  // 20
-  [6, 11],  // 21
-  [6, 12],  // 22 - SAFE ⭐
-  [6, 13],  // 23
-  [6, 14],  // 24
-  [7, 14],  // 25
-  [8, 14],  // 26
-  [8, 13],  // 27 - YELLOW START (Safe ⭐)
-  [8, 12],  // 28
-  [8, 11],  // 29
-  [8, 10],  // 30
-  [8, 9],   // 31
-  [9, 8],   // 32
-  [10, 8],  // 33
-  [11, 8],  // 34
-  [12, 8],  // 35 - SAFE ⭐
-  [13, 8],  // 36
-  [14, 8],  // 37
-  [14, 7],  // 38
-  [14, 6],  // 39
-  [13, 6],  // 40 - BLUE START (Safe ⭐)
-  [12, 6],  // 41
-  [11, 6],  // 42
-  [10, 6],  // 43
-  [9, 6],   // 44
-  [8, 5],   // 45
-  [8, 4],   // 46
-  [8, 3],   // 47
-  [8, 2],   // 48 - SAFE ⭐
-  [8, 1],   // 49
-  [8, 0],   // 50
-  [7, 0],   // 51 - Red entry into Home Runway
-];
-
-// 8 Safe Squares (indices on TRACK_COORDS)
-const SAFE_INDICES = new Set([1, 9, 14, 22, 27, 35, 40, 48]);
-
-// Start indices for each color on TRACK_COORDS
-const START_INDICES: Record<PlayerColor, number> = {
-  red: 1,
-  green: 14,
-  yellow: 27,
-  blue: 40,
-};
-
-// Home Runways (5 cells each, leading into center [7, 7])
-const HOME_RUNWAYS: Record<PlayerColor, [number, number][]> = {
-  red: [
-    [7, 1],
-    [7, 2],
-    [7, 3],
-    [7, 4],
-    [7, 5],
-  ],
-  green: [
-    [1, 7],
-    [2, 7],
-    [3, 7],
-    [4, 7],
-    [5, 7],
-  ],
-  yellow: [
-    [7, 13],
-    [7, 12],
-    [7, 11],
-    [7, 10],
-    [7, 9],
-  ],
-  blue: [
-    [13, 7],
-    [12, 7],
-    [11, 7],
-    [10, 7],
-    [9, 7],
-  ],
-};
-
-// Yard Token default resting slots (row, col)
-const YARD_SLOTS: Record<PlayerColor, [number, number][]> = {
-  red: [
-    [2, 2],
-    [2, 3],
-    [3, 2],
-    [3, 3],
-  ],
-  green: [
-    [2, 11],
-    [2, 12],
-    [3, 11],
-    [3, 12],
-  ],
-  yellow: [
-    [11, 11],
-    [11, 12],
-    [12, 11],
-    [12, 12],
-  ],
-  blue: [
-    [11, 2],
-    [11, 3],
-    [12, 2],
-    [12, 3],
-  ],
-};
-
-// Color palettes for UI rendering
 const COLOR_CONFIG: Record<
   PlayerColor,
   {
@@ -180,6 +56,7 @@ const COLOR_CONFIG: Record<
     lightBg: string;
     badge: string;
     hex: string;
+    emoji: string;
     nameEn: string;
     nameUr: string;
   }
@@ -191,6 +68,7 @@ const COLOR_CONFIG: Record<
     lightBg: 'bg-rose-50',
     badge: 'bg-rose-100 text-rose-700',
     hex: '#f43f5e',
+    emoji: '🔴',
     nameEn: 'Red',
     nameUr: 'سرخ',
   },
@@ -201,6 +79,7 @@ const COLOR_CONFIG: Record<
     lightBg: 'bg-emerald-50',
     badge: 'bg-emerald-100 text-emerald-700',
     hex: '#10b981',
+    emoji: '🟢',
     nameEn: 'Green',
     nameUr: 'سبز',
   },
@@ -211,6 +90,7 @@ const COLOR_CONFIG: Record<
     lightBg: 'bg-amber-50',
     badge: 'bg-amber-100 text-amber-800',
     hex: '#f59e0b',
+    emoji: '🟡',
     nameEn: 'Yellow',
     nameUr: 'پیلا',
   },
@@ -221,9 +101,40 @@ const COLOR_CONFIG: Record<
     lightBg: 'bg-sky-50',
     badge: 'bg-sky-100 text-sky-700',
     hex: '#0284c7',
+    emoji: '🔵',
     nameEn: 'Blue',
     nameUr: 'نیلا',
   },
+};
+
+const getClusterLayout = (count: number, indexInCell: number): { dx: number; dy: number; radius: number } => {
+  if (count <= 1) return { dx: 0, dy: 0, radius: 32 };
+  if (count === 2) {
+    const offsets = [
+      [-17, -10],
+      [17, 10],
+    ];
+    const [dx, dy] = offsets[indexInCell % 2];
+    return { dx, dy, radius: 24 };
+  }
+  if (count === 3) {
+    const offsets = [
+      [-18, -15],
+      [18, -15],
+      [0, 17],
+    ];
+    const [dx, dy] = offsets[indexInCell % 3];
+    return { dx, dy, radius: 21 };
+  }
+  const offsets = [
+    [-18, -18],
+    [18, -18],
+    [-18, 18],
+    [18, 18],
+    [0, 0],
+  ];
+  const [dx, dy] = offsets[indexInCell % offsets.length];
+  return { dx, dy, radius: 19 };
 };
 
 export const LudoGame: React.FC<LudoGameProps> = ({
@@ -232,194 +143,125 @@ export const LudoGame: React.FC<LudoGameProps> = ({
   seniorMode,
   onTriggerConfetti,
 }) => {
-  // Game Setup options
-  const [gameMode, setGameMode] = useState<'bot' | 'pass_play'>('bot');
+  // Setup options
+  const [gameMode, setGameMode] = useState<LudoGameMode>('bot');
   const [playerCount, setPlayerCount] = useState<2 | 4>(2);
-  const [targetTokensToWin, setTargetTokensToWin] = useState<2 | 4>(2); // Quick (2) vs Classic (4)
-  const [gameStarted, setGameStarted] = useState(false);
+  const [targetTokensToWin, setTargetTokensToWin] = useState<2 | 4>(2);
+  const [savedMatch, setSavedMatch] = useState<LudoMatchState | null>(() => loadSavedLudoMatchState());
 
-  // Active match state
-  const [players, setPlayers] = useState<PlayerInfo[]>([]);
-  const [currentPlayerIdx, setCurrentPlayerIdx] = useState(0);
-  const [diceValue, setDiceValue] = useState<number | null>(null);
-  const [isRolling, setIsRolling] = useState(false);
-  const [movableTokenIds, setMovableTokenIds] = useState<number[]>([]);
+  // Active match state driven strictly by ludoEngine state machine
+  const [matchState, setMatchState] = useState<LudoMatchState | null>(null);
   const [turnMessage, setTurnMessage] = useState<string>('Roll the dice!');
-  const [consecutiveSixes, setConsecutiveSixes] = useState(0);
-  const [winner, setWinner] = useState<PlayerInfo | null>(null);
   const [isSoundMuted, setIsSoundMuted] = useState(() => soundService.getMuted());
   const [recentCaptureText, setRecentCaptureText] = useState<string | null>(null);
+  const [isOffline, setIsOffline] = useState<boolean>(() =>
+    typeof navigator !== 'undefined' ? !navigator.onLine : false
+  );
+  const [reconnectedNotice, setReconnectedNotice] = useState<boolean>(false);
 
-  // Animation and timer refs
-  const botTurnTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-  const captureAnimTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  // Synchronous ref to avoid stale closures in dice/bot timers
+  const matchRef = useRef<LudoMatchState | null>(null);
+  const diceRollTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const botTurnTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const captureAnimTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const reconnectNoticeTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Initialize a new match
-  const initializeMatch = useCallback(() => {
-    const activeColors: PlayerColor[] =
-      playerCount === 2 ? ['red', 'green'] : ['red', 'green', 'yellow', 'blue'];
-
-    const newPlayers: PlayerInfo[] = activeColors.map((color, idx) => {
-      const isHuman = gameMode === 'pass_play' || idx === 0;
-      let name = '';
-      let avatar = '👤';
-
-      if (idx === 0) {
-        name = seniorMode ? 'آپ (You)' : 'You (Red)';
-        avatar = '👑';
-      } else if (isHuman) {
-        name = `Player ${idx + 1} (${COLOR_CONFIG[color].nameEn})`;
-        avatar = '👥';
+  const commitMatchState = useCallback((next: LudoMatchState | null) => {
+    matchRef.current = next;
+    setMatchState(next);
+    if (next) {
+      saveLudoMatchState(next);
+      if (next.winnerColor !== null || next.turnPhase === 'finished') {
+        setSavedMatch(null);
       } else {
-        const botNames = ['Panda Bot 🐼', 'Bunny Bot 🐰', 'Tiger Bot 🐯'];
-        name = botNames[idx - 1] || `Bot ${idx}`;
-        avatar = idx === 1 ? '🐼' : idx === 2 ? '🐰' : '🐯';
+        setSavedMatch(next);
       }
+    }
+  }, []);
 
-      const tokens: Token[] = [0, 1, 2, 3].map((id) => ({
-        id,
-        color,
-        step: -1, // -1 means resting in yard
-      }));
+  const clearAllTimers = useCallback(() => {
+    if (diceRollTimeoutRef.current) {
+      clearTimeout(diceRollTimeoutRef.current);
+      diceRollTimeoutRef.current = null;
+    }
+    if (botTurnTimeoutRef.current) {
+      clearTimeout(botTurnTimeoutRef.current);
+      botTurnTimeoutRef.current = null;
+    }
+    if (captureAnimTimeoutRef.current) {
+      clearTimeout(captureAnimTimeoutRef.current);
+      captureAnimTimeoutRef.current = null;
+    }
+    if (reconnectNoticeTimeoutRef.current) {
+      clearTimeout(reconnectNoticeTimeoutRef.current);
+      reconnectNoticeTimeoutRef.current = null;
+    }
+  }, []);
 
-      return {
-        color,
-        name,
-        avatar,
-        isBot: !isHuman,
-        tokens,
-        hasWon: false,
-      };
-    });
-
-    setPlayers(newPlayers);
-    setCurrentPlayerIdx(0);
-    setDiceValue(null);
-    setIsRolling(false);
-    setMovableTokenIds([]);
-    setConsecutiveSixes(0);
-    setWinner(null);
-    setRecentCaptureText(null);
-    setTurnMessage(
-      seniorMode
-        ? '🔴 آپ کی باری ہے! ڈائس رول کریں'
-        : '🔴 Your Turn! Roll the dice'
-    );
-    setGameStarted(true);
-  }, [gameMode, playerCount, seniorMode]);
-
-  // Cleanup timeouts on unmount
+  // Cleanup timers on unmount (saved state remains safely persisted in localStorage)
   useEffect(() => {
     return () => {
-      if (botTurnTimeoutRef.current) clearTimeout(botTurnTimeoutRef.current);
-      if (captureAnimTimeoutRef.current) clearTimeout(captureAnimTimeoutRef.current);
+      clearAllTimers();
+    };
+  }, [clearAllTimers]);
+
+  // Disconnection / reconnection listener — never corrupts or resets match state
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const handleOffline = () => {
+      setIsOffline(true);
+      setReconnectedNotice(false);
+    };
+    const handleOnline = () => {
+      setIsOffline(false);
+      setReconnectedNotice(true);
+      if (reconnectNoticeTimeoutRef.current) clearTimeout(reconnectNoticeTimeoutRef.current);
+      reconnectNoticeTimeoutRef.current = setTimeout(() => {
+        setReconnectedNotice(false);
+      }, 3200);
+    };
+    window.addEventListener('offline', handleOffline);
+    window.addEventListener('online', handleOnline);
+    return () => {
+      window.removeEventListener('offline', handleOffline);
+      window.removeEventListener('online', handleOnline);
     };
   }, []);
 
-  // Compute position (row, col) for a token given its step
-  const getTokenCoords = useCallback(
-    (token: Token): [number, number] => {
-      if (token.step === -1) {
-        return YARD_SLOTS[token.color][token.id];
-      }
-      if (token.step >= 0 && token.step <= 50) {
-        const startIdx = START_INDICES[token.color];
-        const globalIdx = (startIdx + token.step) % 52;
-        return TRACK_COORDS[globalIdx];
-      }
-      if (token.step >= 51 && token.step <= 55) {
-        const runwayIdx = token.step - 51;
-        return HOME_RUNWAYS[token.color][runwayIdx];
-      }
-      // Reached Home Triangle Center
-      return [7, 7];
-    },
-    []
-  );
+  // Mutual recursion ref for scheduling Bot rolls
+  const triggerDiceRollRef = useRef<() => void>(() => {});
 
-  // Check if a move is valid for a token with rolled dice value
-  const canMoveToken = useCallback((token: Token, dice: number): boolean => {
-    if (token.step === 56) return false; // Already finished
-    if (token.step === -1) {
-      return dice === 6; // Needs a 6 to open
-    }
-    // Cannot exceed step 56 (needs exact roll to enter home)
-    return token.step + dice <= 56;
-  }, []);
-
-  // Find all movable tokens for the active player
-  const getMovableTokens = useCallback(
-    (player: PlayerInfo, dice: number): number[] => {
-      return player.tokens
-        .filter((t) => canMoveToken(t, dice))
-        .map((t) => t.id);
-    },
-    [canMoveToken]
-  );
-
-  // Execute a move for a specific token
+  // Execute a validated token move
   const executeTokenMove = useCallback(
-    (tokenId: number, rolledDice: number) => {
-      const activePlayer = players[currentPlayerIdx];
-      if (!activePlayer) return;
+    (tokenId: number) => {
+      const current = matchRef.current;
+      if (!current) return;
+
+      const activePlayer = current.players[current.currentPlayerIdx];
+      const outcome = applyTokenMove(current, tokenId);
+      if (!outcome.accepted) return;
 
       soundService.playPieceMove();
-      setMovableTokenIds([]);
-
-      const updatedTokens = activePlayer.tokens.map((t) => {
-        if (t.id !== tokenId) return t;
-        if (t.step === -1) {
-          // Open token to start square (step 0)
-          return { ...t, step: 0 };
-        }
-        return { ...t, step: t.step + rolledDice };
-      });
-
-      const movedToken = updatedTokens.find((t) => t.id === tokenId)!;
-
-      // Check for Token Victory (reached step 56)
-      let justWonToken = false;
-      if (movedToken.step === 56) {
-        justWonToken = true;
+      if (outcome.reachedHome) {
         soundService.playSuccess();
       }
 
-      // Check for Capturing / Cutting Opponent Tokens on common track
-      let capturedOpponent = false;
-      let capturedColorName = '';
+      commitMatchState(outcome.state);
 
-      if (movedToken.step >= 0 && movedToken.step <= 50) {
-        const startIdx = START_INDICES[movedToken.color];
-        const globalIdx = (startIdx + movedToken.step) % 52;
-        const isSafeSquare = SAFE_INDICES.has(globalIdx);
-
-        if (!isSafeSquare) {
-          // Check all other players' tokens at this exact cell
-          players.forEach((otherPlayer, pIdx) => {
-            if (pIdx === currentPlayerIdx) return;
-            otherPlayer.tokens.forEach((otherToken) => {
-              if (otherToken.step >= 0 && otherToken.step <= 50) {
-                const otherStartIdx = START_INDICES[otherToken.color];
-                const otherGlobalIdx = (otherStartIdx + otherToken.step) % 52;
-                if (otherGlobalIdx === globalIdx) {
-                  // CAPTURE!
-                  capturedOpponent = true;
-                  capturedColorName = COLOR_CONFIG[otherToken.color].nameEn;
-                  otherToken.step = -1; // Send back to Yard!
-                }
-              }
-            });
-          });
-        }
-      }
-
-      if (capturedOpponent) {
+      if (outcome.capturedCount > 0 && activePlayer) {
         soundService.playCapture();
         const bonusPoints = 15;
-        onEarnPoints(bonusPoints, `Ludo: Captured ${capturedColorName} Token 🎯`);
-        const msg = seniorMode
-          ? `🎯 گوٹی کٹ گئی! زبردست! (+${bonusPoints} Pts) دوبارہ رول کریں!`
-          : `🎯 Token Captured! (+${bonusPoints} Pts) Bonus Roll Awarded!`;
+        const capturedLabel = outcome.capturedColorNames.join(' & ') || 'Opponent';
+        if (!activePlayer.isBot) {
+          onEarnPoints(bonusPoints, `Ludo: Captured ${capturedLabel} Token 🎯`);
+        }
+        const msg = activePlayer.isBot
+          ? seniorMode
+            ? `🎯 ${activePlayer.name.split(' ')[0]} نے گوٹی کاٹ دی!`
+            : `🎯 ${activePlayer.name.split(' ')[0]} captured a token!`
+          : seniorMode
+            ? `🎯 گوٹی کٹ گئی! زبردست! (+${bonusPoints} Pts) دوبارہ رول کریں!`
+            : `🎯 Token Captured! (+${bonusPoints} Pts) Bonus Roll Awarded!`;
         setRecentCaptureText(msg);
         if (captureAnimTimeoutRef.current) clearTimeout(captureAnimTimeoutRef.current);
         captureAnimTimeoutRef.current = setTimeout(() => {
@@ -427,286 +269,373 @@ export const LudoGame: React.FC<LudoGameProps> = ({
         }, 3200);
       }
 
-      // Count finished tokens
-      const finishedCount = updatedTokens.filter((t) => t.step === 56).length;
-      const playerWonMatch = finishedCount >= targetTokensToWin;
-
-      const updatedPlayers = players.map((p, idx) => {
-        if (idx === currentPlayerIdx) {
-          return {
-            ...p,
-            tokens: updatedTokens,
-            hasWon: playerWonMatch,
-          };
+      if (outcome.playerWon && activePlayer) {
+        if (!activePlayer.isBot) {
+          soundService.playDailyGoalCheer();
+          onTriggerConfetti?.();
+          const matchPrize = outcome.state.targetTokensToWin === 2 ? 50 : 100;
+          onEarnPoints(
+            matchPrize,
+            `JoyLudo Champion Victory (${outcome.state.targetTokensToWin} Tokens Reached Home 👑)`
+          );
         }
-        return p;
-      });
-
-      setPlayers(updatedPlayers);
-
-      // Check Match End
-      if (playerWonMatch) {
-        setWinner(activePlayer);
-        soundService.playDailyGoalCheer();
-        onTriggerConfetti?.();
-        const matchPrize = targetTokensToWin === 2 ? 50 : 100;
-        onEarnPoints(
-          matchPrize,
-          `JoyLudo Champion Victory (${targetTokensToWin} Tokens Reached Home 👑)`
-        );
         return;
       }
 
-      // Turn continuation rules:
-      // In Ludo, rolling a 6 OR capturing a token OR reaching home grants an EXTRA TURN!
-      const getsBonusTurn = rolledDice === 6 || capturedOpponent || justWonToken;
+      const nextActivePlayer = outcome.state.players[outcome.state.currentPlayerIdx];
+      if (!nextActivePlayer) return;
 
-      if (getsBonusTurn && consecutiveSixes < 2) {
-        // Active player rolls again
-        setDiceValue(null);
+      if (outcome.bonusTurnAwarded) {
         setTurnMessage(
           seniorMode
-            ? `${COLOR_CONFIG[activePlayer.color].nameUr} کو اضافی باری ملی! دوبارہ رول کریں 🎲`
-            : `${activePlayer.name} earned a bonus roll! Roll again 🎲`
+            ? `${COLOR_CONFIG[nextActivePlayer.color].nameUr} کو اضافی باری ملی! دوبارہ رول کریں 🎲`
+            : `${nextActivePlayer.name} earned a bonus roll! Roll again 🎲`
         );
-
-        if (activePlayer.isBot) {
-          botTurnTimeoutRef.current = setTimeout(() => {
-            triggerDiceRoll();
-          }, 900);
-        }
       } else {
-        // Pass turn to next player
-        setConsecutiveSixes(0);
-        setDiceValue(null);
-        const nextIdx = (currentPlayerIdx + 1) % players.length;
-        setCurrentPlayerIdx(nextIdx);
-        const nextPlayer = players[nextIdx];
         setTurnMessage(
           seniorMode
-            ? `${COLOR_CONFIG[nextPlayer.color].nameUr} کی باری ہے...`
-            : `${nextPlayer.name}'s turn...`
+            ? `${COLOR_CONFIG[nextActivePlayer.color].nameUr} کی باری ہے...`
+            : `${nextActivePlayer.name}'s turn...`
         );
+      }
 
-        if (nextPlayer.isBot) {
-          botTurnTimeoutRef.current = setTimeout(() => {
-            triggerDiceRoll(nextIdx);
-          }, 900);
-        }
+      if (nextActivePlayer.isBot) {
+        if (botTurnTimeoutRef.current) clearTimeout(botTurnTimeoutRef.current);
+        botTurnTimeoutRef.current = setTimeout(() => {
+          triggerDiceRollRef.current();
+        }, 850);
       }
     },
-    [
-      players,
-      currentPlayerIdx,
-      seniorMode,
-      targetTokensToWin,
-      consecutiveSixes,
-      onEarnPoints,
-      onTriggerConfetti,
-    ]
+    [commitMatchState, onEarnPoints, onTriggerConfetti, seniorMode]
   );
 
-  // Trigger Dice Roll (Human or Bot)
-  const triggerDiceRoll = useCallback(
-    (explicitPlayerIdx?: number) => {
-      const pIdx = explicitPlayerIdx !== undefined ? explicitPlayerIdx : currentPlayerIdx;
-      const player = players[pIdx];
-      if (!player || isRolling || winner) return;
+  // Trigger dice roll strictly through beginDiceRoll -> applyDiceRoll state machine
+  const triggerDiceRoll = useCallback(() => {
+    const current = matchRef.current;
+    if (!current) return;
 
-      setIsRolling(true);
-      soundService.playDiceRoll();
+    const started = beginDiceRoll(current);
+    if (!started.accepted) return;
 
-      // Animate dice tumbling for 600ms
-      setTimeout(() => {
-        const rolled = Math.floor(Math.random() * 6) + 1;
-        setDiceValue(rolled);
-        setIsRolling(false);
+    commitMatchState(started.state);
+    soundService.playDiceRoll();
 
-        // Check for 3 sixes penalty
-        if (rolled === 6) {
-          if (consecutiveSixes >= 2) {
-            // Three 6s in a row: forfeit turn
-            setConsecutiveSixes(0);
-            setTurnMessage(
-              seniorMode
-                ? 'تین چھکے! باری اگلے کھلاڑی کو منتقل ہو گئی'
-                : '3 Sixes in a row! Turn forfeited.'
-            );
-            const nextIdx = (pIdx + 1) % players.length;
-            setCurrentPlayerIdx(nextIdx);
-            if (players[nextIdx].isBot) {
-              botTurnTimeoutRef.current = setTimeout(() => {
-                triggerDiceRoll(nextIdx);
-              }, 900);
-            }
-            return;
+    if (diceRollTimeoutRef.current) clearTimeout(diceRollTimeoutRef.current);
+    diceRollTimeoutRef.current = setTimeout(() => {
+      diceRollTimeoutRef.current = null;
+      const latest = matchRef.current;
+      if (!latest || latest.turnPhase !== 'rolling' || latest.winnerColor !== null) return;
+
+      const rolled = Math.floor(Math.random() * 6) + 1;
+      const outcome = applyDiceRoll(latest, rolled);
+      if (!outcome.accepted) return;
+
+      commitMatchState(outcome.state);
+      const latestPlayer = outcome.state.players[outcome.state.currentPlayerIdx];
+      if (!latestPlayer) return;
+
+      if (outcome.forfeitedByThreeSixes) {
+        setTurnMessage(
+          seniorMode
+            ? 'تین چھکے! باری اگلے کھلاڑی کو منتقل ہو گئی'
+            : '3 Sixes in a row! Turn forfeited.'
+        );
+        if (botTurnTimeoutRef.current) clearTimeout(botTurnTimeoutRef.current);
+        botTurnTimeoutRef.current = setTimeout(() => {
+          const cur = matchRef.current;
+          if (!cur || cur.turnPhase !== 'transitioning') return;
+          const nextState = advanceToNextTurn(cur);
+          commitMatchState(nextState);
+          const nextPlayer = nextState.players[nextState.currentPlayerIdx];
+          if (!nextPlayer) return;
+          setTurnMessage(
+            seniorMode
+              ? `${COLOR_CONFIG[nextPlayer.color].nameUr} کی باری ہے...`
+              : `${nextPlayer.name}'s turn...`
+          );
+          if (nextPlayer.isBot) {
+            botTurnTimeoutRef.current = setTimeout(() => {
+              triggerDiceRollRef.current();
+            }, 850);
           }
-          setConsecutiveSixes((prev) => prev + 1);
-        } else {
-          setConsecutiveSixes(0);
-        }
+        }, 950);
+        return;
+      }
 
-        const validMoves = getMovableTokens(player, rolled);
-        setMovableTokenIds(validMoves);
-
-        if (validMoves.length === 0) {
-          // No valid moves: notify and pass turn
-          setTurnMessage(
-            rolled === 6
-              ? seniorMode
-                ? 'کوئی گوٹی نہیں چلائی جا سکتی'
-                : 'No movable tokens'
-              : seniorMode
-                ? 'کوئی گوٹی نہیں کھل سکی (چھکہ چاہیے)'
-                : 'No movable tokens (Needs a 6)'
-          );
-
-          botTurnTimeoutRef.current = setTimeout(() => {
-            setDiceValue(null);
-            const nextIdx = (pIdx + 1) % players.length;
-            setCurrentPlayerIdx(nextIdx);
-            const nextPlayer = players[nextIdx];
-            setTurnMessage(
-              seniorMode
-                ? `${COLOR_CONFIG[nextPlayer.color].nameUr} کی باری ہے...`
-                : `${nextPlayer.name}'s turn...`
-            );
-            if (nextPlayer.isBot) {
-              botTurnTimeoutRef.current = setTimeout(() => {
-                triggerDiceRoll(nextIdx);
-              }, 900);
-            }
-          }, 1100);
-        } else if (validMoves.length === 1 && player.isBot) {
-          // Bot has only 1 move: auto-execute
-          botTurnTimeoutRef.current = setTimeout(() => {
-            executeTokenMove(validMoves[0], rolled);
-          }, 750);
-        } else if (player.isBot) {
-          // Smart Bot AI Decision Engine
-          botTurnTimeoutRef.current = setTimeout(() => {
-            let bestTokenId = validMoves[0];
-            let bestScore = -9999;
-
-            validMoves.forEach((tId) => {
-              const token = player.tokens.find((t) => t.id === tId)!;
-              let score = 0;
-
-              // Priority 1: Capturing an opponent (+1000)
-              if (token.step >= 0 && token.step + rolled <= 50) {
-                const targetStep = token.step + rolled;
-                const targetGlobalIdx =
-                  (START_INDICES[token.color] + targetStep) % 52;
-                if (!SAFE_INDICES.has(targetGlobalIdx)) {
-                  players.forEach((otherP, oIdx) => {
-                    if (oIdx === pIdx) return;
-                    otherP.tokens.forEach((otherT) => {
-                      if (otherT.step >= 0 && otherT.step <= 50) {
-                        const oGlobal =
-                          (START_INDICES[otherT.color] + otherT.step) % 52;
-                        if (oGlobal === targetGlobalIdx) {
-                          score += 1000;
-                        }
-                      }
-                    });
-                  });
-                }
-              }
-
-              // Priority 2: Reaching Home (+500)
-              if (token.step + rolled === 56) {
-                score += 500;
-              }
-
-              // Priority 3: Opening from yard on a 6 (+400)
-              if (token.step === -1 && rolled === 6) {
-                score += 400;
-              }
-
-              // Priority 4: Reaching a safe star square (+250)
-              if (token.step >= 0 && token.step + rolled <= 50) {
-                const targetStep = token.step + rolled;
-                const targetGlobal =
-                  (START_INDICES[token.color] + targetStep) % 52;
-                if (SAFE_INDICES.has(targetGlobal)) {
-                  score += 250;
-                }
-              }
-
-              // Priority 5: Advancing furthest token (+100 + step)
-              score += 100 + token.step;
-
-              if (score > bestScore) {
-                bestScore = score;
-                bestTokenId = tId;
-              }
-            });
-
-            executeTokenMove(bestTokenId, rolled);
-          }, 850);
-        } else if (validMoves.length === 1 && player.tokens[validMoves[0]].step === -1) {
-          // If human rolled 6 and only has Yard tokens, auto prompt with highlight
+      if (outcome.noValidMoves) {
+        setTurnMessage(
+          rolled === 6
+            ? seniorMode
+              ? 'کوئی گوٹی نہیں چلائی جا سکتی'
+              : 'No movable tokens'
+            : seniorMode
+              ? 'کوئی گوٹی نہیں کھل سکی (چھکہ چاہیے)'
+              : 'No movable tokens (Needs a 6)'
+        );
+        if (botTurnTimeoutRef.current) clearTimeout(botTurnTimeoutRef.current);
+        botTurnTimeoutRef.current = setTimeout(() => {
+          const cur = matchRef.current;
+          if (!cur || cur.turnPhase !== 'transitioning') return;
+          const nextState = advanceToNextTurn(cur);
+          commitMatchState(nextState);
+          const nextPlayer = nextState.players[nextState.currentPlayerIdx];
+          if (!nextPlayer) return;
           setTurnMessage(
             seniorMode
-              ? 'چھکہ! گوٹی کھولنے کے لیے ہائی لائٹ شدہ دائرے پر ٹیپ کریں'
-              : 'Six! Tap your highlighted token to bring it out'
+              ? `${COLOR_CONFIG[nextPlayer.color].nameUr} کی باری ہے...`
+              : `${nextPlayer.name}'s turn...`
           );
-        } else {
-          setTurnMessage(
-            seniorMode
-              ? 'گوٹی منتخب کریں جو آپ آگے بڑھانا چاہتے ہیں'
-              : 'Tap a highlighted token to move it'
-          );
+          if (nextPlayer.isBot) {
+            botTurnTimeoutRef.current = setTimeout(() => {
+              triggerDiceRollRef.current();
+            }, 850);
+          }
+        }, 1000);
+        return;
+      }
+
+      if (latestPlayer.isBot) {
+        const chosenId = chooseBestBotToken(outcome.state);
+        if (chosenId !== null) {
+          if (botTurnTimeoutRef.current) clearTimeout(botTurnTimeoutRef.current);
+          botTurnTimeoutRef.current = setTimeout(() => {
+            executeTokenMove(chosenId);
+          }, outcome.validMoves.length === 1 ? 650 : 800);
         }
-      }, 600);
-    },
-    [
-      currentPlayerIdx,
-      players,
-      isRolling,
-      winner,
-      consecutiveSixes,
+        return;
+      }
+
+      if (
+        outcome.validMoves.length === 1 &&
+        latestPlayer.tokens[outcome.validMoves[0]]?.step === -1
+      ) {
+        setTurnMessage(
+          seniorMode
+            ? 'چھکہ! گوٹی کھولنے کے لیے ہائی لائٹ شدہ دائرے پر ٹیپ کریں'
+            : 'Six! Tap your highlighted token to bring it out'
+        );
+      } else {
+        setTurnMessage(
+          seniorMode
+            ? 'گوٹی منتخب کریں جو آپ آگے بڑھانا چاہتے ہیں'
+            : 'Tap a highlighted token to move it'
+        );
+      }
+    }, 520);
+  }, [commitMatchState, executeTokenMove, seniorMode]);
+
+  useEffect(() => {
+    triggerDiceRollRef.current = triggerDiceRoll;
+  }, [triggerDiceRoll]);
+
+  // Start a brand-new match
+  const initializeMatch = useCallback(() => {
+    clearAllTimers();
+    clearSavedLudoMatchState();
+    const fresh = createInitialLudoMatch({
+      gameMode,
+      playerCount,
+      targetTokensToWin,
       seniorMode,
-      getMovableTokens,
-      executeTokenMove,
-    ]
-  );
+    });
+    commitMatchState(fresh);
+    setRecentCaptureText(null);
+    setTurnMessage(
+      seniorMode ? '🔴 آپ کی باری ہے! ڈائس رول کریں' : '🔴 Your Turn! Roll the dice'
+    );
+  }, [clearAllTimers, commitMatchState, gameMode, playerCount, seniorMode, targetTokensToWin]);
 
-  // Active Player & helpers
-  const activePlayer = players[currentPlayerIdx];
-  const isHumanTurn = activePlayer && !activePlayer.isBot;
+  // Resume a saved match cleanly (and resume bot turn if it was a bot's turn)
+  const handleResumeSavedMatch = useCallback(() => {
+    const restored = loadSavedLudoMatchState();
+    if (!restored) {
+      setSavedMatch(null);
+      return;
+    }
+    clearAllTimers();
+    setGameMode(restored.gameMode);
+    setPlayerCount(restored.playerCount);
+    setTargetTokensToWin(restored.targetTokensToWin);
+    commitMatchState(restored);
+    setRecentCaptureText(null);
 
-  // Toggle Mute
+    const active = restored.players[restored.currentPlayerIdx];
+    if (!active) return;
+
+    if (restored.turnPhase === 'awaiting_move' && restored.diceValue !== null) {
+      if (active.isBot) {
+        setTurnMessage(seniorMode ? 'روبوٹ کی باری جاری ہے...' : `${active.name} resuming move...`);
+        const chosenId = chooseBestBotToken(restored);
+        if (chosenId !== null) {
+          botTurnTimeoutRef.current = setTimeout(() => {
+            executeTokenMove(chosenId);
+          }, 700);
+        }
+      } else {
+        setTurnMessage(
+          seniorMode
+            ? 'میچ بحال ہو گیا! ہائی لائٹ شدہ گوٹی منتخب کریں'
+            : 'Match restored! Tap a highlighted token to move'
+        );
+      }
+    } else if (active.isBot) {
+      setTurnMessage(seniorMode ? 'روبوٹ کی باری جاری ہے...' : `${active.name}'s turn...`);
+      botTurnTimeoutRef.current = setTimeout(() => {
+        triggerDiceRollRef.current();
+      }, 750);
+    } else {
+      setTurnMessage(
+        seniorMode
+          ? `${COLOR_CONFIG[active.color].nameUr} کی باری بحال ہو گئی! ڈائس رول کریں`
+          : `${active.name}'s turn restored! Roll the dice`
+      );
+    }
+  }, [clearAllTimers, commitMatchState, executeTokenMove, seniorMode]);
+
+  const handleDiscardSavedMatch = useCallback(() => {
+    clearSavedLudoMatchState();
+    setSavedMatch(null);
+  }, []);
+
+  const handleBackToSetup = useCallback(() => {
+    clearAllTimers();
+    matchRef.current = null;
+    setMatchState(null);
+    setRecentCaptureText(null);
+    setSavedMatch(loadSavedLudoMatchState());
+  }, [clearAllTimers]);
+
   const handleToggleSound = () => {
     const next = !isSoundMuted;
     setIsSoundMuted(next);
     soundService.setMuted(next);
   };
 
+  // Derived view values
+  const gameStarted = matchState !== null;
+  const players = matchState?.players ?? [];
+  const currentPlayerIdx = matchState?.currentPlayerIdx ?? 0;
+  const diceValue = matchState?.diceValue ?? null;
+  const turnPhase = matchState?.turnPhase ?? 'awaiting_roll';
+  const isRolling = turnPhase === 'rolling';
+  const movableTokenIds = matchState?.movableTokenIds ?? [];
+  const activePlayer = players[currentPlayerIdx];
+  const isHumanTurn = Boolean(activePlayer && !activePlayer.isBot);
+  const winner = matchState?.winnerColor
+    ? players.find((p) => p.color === matchState.winnerColor) ?? null
+    : null;
+  const effectiveTargetTokens = matchState?.targetTokensToWin ?? targetTokensToWin;
+
+  // Pre-compute board tokens:
+  // - Yard tokens use exact YARD_TOKEN_SVG_COORDS aligned with the 4 yard circles
+  // - Track/Runway tokens use 15x15 grid coordinates with clean multi-token clustering
+  const renderedTokens = (() => {
+    const boardItems: {
+      playerIdx: number;
+      token: Token;
+      cx: number;
+      cy: number;
+      radius: number;
+      isMovable: boolean;
+    }[] = [];
+
+    const cellGroups = new Map<string, { playerIdx: number; token: Token; r: number; c: number }[]>();
+
+    players.forEach((p, pIdx) => {
+      p.tokens.forEach((token) => {
+        if (token.step === 56) return;
+
+        const isMovable =
+          pIdx === currentPlayerIdx &&
+          turnPhase === 'awaiting_move' &&
+          movableTokenIds.includes(token.id) &&
+          diceValue !== null &&
+          winner === null;
+
+        if (token.step === -1) {
+          const [cx, cy] = YARD_TOKEN_SVG_COORDS[token.color][token.id];
+          boardItems.push({
+            playerIdx: pIdx,
+            token,
+            cx,
+            cy,
+            radius: 34,
+            isMovable,
+          });
+          return;
+        }
+
+        const coords = getTokenBoardGridCoords(token);
+        if (!coords) return;
+        const [r, c] = coords;
+        const key = `${r},${c}`;
+        const list = cellGroups.get(key) || [];
+        list.push({ playerIdx: pIdx, token, r, c });
+        cellGroups.set(key, list);
+      });
+    });
+
+    cellGroups.forEach((group) => {
+      group.forEach((item, indexInCell) => {
+        const { dx, dy, radius } = getClusterLayout(group.length, indexInCell);
+        const isMovable =
+          item.playerIdx === currentPlayerIdx &&
+          turnPhase === 'awaiting_move' &&
+          movableTokenIds.includes(item.token.id) &&
+          diceValue !== null &&
+          winner === null;
+        boardItems.push({
+          playerIdx: item.playerIdx,
+          token: item.token,
+          cx: item.c * 100 + 50 + dx,
+          cy: item.r * 100 + 50 + dy,
+          radius,
+          isMovable,
+        });
+      });
+    });
+
+    // Draw movable tokens last so they sit on top of stacked tokens for easy tapping
+    boardItems.sort((a, b) => Number(a.isMovable) - Number(b.isMovable));
+    return boardItems;
+  })();
+
+  const finishedTokens = players.flatMap((p) => {
+    const done = p.tokens.filter((t) => t.step === 56);
+    return done.map((token, idx) => {
+      const [cx, cy] = HOME_FINISH_SLOTS[token.color][idx % 4];
+      return { token, cx, cy };
+    });
+  });
+
+  const canHumanRoll =
+    isHumanTurn && turnPhase === 'awaiting_roll' && diceValue === null && winner === null;
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-md p-2 sm:p-4 overflow-y-auto">
       <div className="bg-white rounded-3xl w-full max-w-md shadow-2xl overflow-hidden border-2 border-pink-200 flex flex-col my-auto max-h-[96vh]">
         {/* Top Header */}
-        <header className="bg-gradient-to-r from-rose-500 via-pink-600 to-rose-700 p-3.5 text-white flex items-center justify-between shadow-md">
-          <div className="flex items-center gap-2">
+        <header className="bg-gradient-to-r from-rose-500 via-pink-600 to-rose-700 p-3.5 text-white flex items-center justify-between shadow-md shrink-0">
+          <div className="flex items-center gap-2 min-w-0">
             <button
+              type="button"
               onClick={onClose}
-              className="p-1.5 rounded-full bg-white/20 hover:bg-white/30 text-white tap-bounce"
+              className="p-1.5 rounded-full bg-white/20 hover:bg-white/30 text-white tap-bounce shrink-0"
               title="Close Ludo"
             >
               <ArrowLeft className="w-4 h-4" />
             </button>
-            <div>
+            <div className="min-w-0">
               <div className="flex items-center gap-1.5">
                 <span className="text-xl">🎲</span>
-                <h1 className="font-black text-base tracking-tight flex items-center gap-1">
+                <h1 className="font-black text-base tracking-tight flex items-center gap-1 truncate">
                   JoyLudo Royal
-                  <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-amber-400 text-amber-950 uppercase">
-                    {targetTokensToWin === 2 ? 'Quick' : 'Classic'}
+                  <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-amber-400 text-amber-950 uppercase shrink-0">
+                    {effectiveTargetTokens === 2 ? 'Quick' : 'Classic'}
                   </span>
                 </h1>
               </div>
-              <p className="text-[10.5px] text-rose-100 font-medium">
+              <p className="text-[10.5px] text-rose-100 font-medium truncate">
                 {seniorMode
                   ? 'اصلی لودو • دوستوں یا روبوٹ کے ساتھ کھیلیں اور پوائنٹس جیتیں'
                   : 'Play vs Bot or Pass & Play • 100% Free & Win JoyPoints'}
@@ -714,27 +643,102 @@ export const LudoGame: React.FC<LudoGameProps> = ({
             </div>
           </div>
 
-          <div className="flex items-center gap-1.5">
+          <div className="flex items-center gap-1.5 shrink-0">
             <button
+              type="button"
               onClick={handleToggleSound}
               className="p-1.5 rounded-full bg-white/20 hover:bg-white/30 text-white tap-bounce text-xs"
               title={isSoundMuted ? 'Unmute' : 'Mute'}
             >
               {isSoundMuted ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
             </button>
-            <button
-              onClick={initializeMatch}
-              className="p-1.5 rounded-full bg-white/20 hover:bg-white/30 text-white tap-bounce text-xs"
-              title="Restart Game"
-            >
-              <RotateCcw className="w-4 h-4" />
-            </button>
+            {gameStarted && (
+              <>
+                <button
+                  type="button"
+                  onClick={handleBackToSetup}
+                  className="p-1.5 rounded-full bg-white/20 hover:bg-white/30 text-white tap-bounce text-xs"
+                  title="Change Mode / Setup"
+                >
+                  <SlidersHorizontal className="w-4 h-4" />
+                </button>
+                <button
+                  type="button"
+                  onClick={initializeMatch}
+                  className="p-1.5 rounded-full bg-white/20 hover:bg-white/30 text-white tap-bounce text-xs"
+                  title="Restart Match"
+                >
+                  <RotateCcw className="w-4 h-4" />
+                </button>
+              </>
+            )}
           </div>
         </header>
 
-        {/* SETUP SCREEN (If game not yet configured) */}
+        {/* Connection status notice (non-intrusive, never interrupts gameplay) */}
+        {(isOffline || reconnectedNotice) && (
+          <div
+            className={`px-3 py-1.5 text-[11px] font-bold flex items-center justify-center gap-1.5 shrink-0 ${
+              isOffline
+                ? 'bg-amber-50 text-amber-800 border-b border-amber-200'
+                : 'bg-emerald-50 text-emerald-800 border-b border-emerald-200'
+            }`}
+          >
+            {isOffline ? (
+              <>
+                <WifiOff className="w-3.5 h-3.5 shrink-0" />
+                <span>
+                  {seniorMode
+                    ? 'آف لائن موڈ — میچ محفوظ ہے، انٹرنیٹ بحال ہونے پر پوائنٹس سنک ہوں گے'
+                    : 'Offline — match saved locally, points sync automatically on reconnect'}
+                </span>
+              </>
+            ) : (
+              <span>
+                {seniorMode
+                  ? '✓ انٹرنیٹ بحال ہو گیا — میچ جاری ہے'
+                  : '✓ Reconnected — match progress intact'}
+              </span>
+            )}
+          </div>
+        )}
+
+        {/* SETUP SCREEN */}
         {!gameStarted ? (
           <div className="p-5 space-y-4 overflow-y-auto">
+            {/* Saved Match Resume Banner */}
+            {savedMatch && (
+              <div className="bg-emerald-50 border-2 border-emerald-200 rounded-2xl p-3 flex items-center justify-between gap-2 shadow-xs">
+                <div className="min-w-0">
+                  <div className="text-xs font-black text-emerald-900">
+                    {seniorMode ? 'محفوظ شدہ میچ موجود ہے' : 'Unfinished Match Saved'}
+                  </div>
+                  <p className="text-[10.5px] text-emerald-700 font-medium truncate">
+                    {savedMatch.playerCount}P • {savedMatch.gameMode === 'bot' ? 'Vs Bot' : 'Pass & Play'} •{' '}
+                    {savedMatch.targetTokensToWin === 2 ? 'Quick' : 'Classic'}
+                  </p>
+                </div>
+                <div className="flex items-center gap-1.5 shrink-0">
+                  <button
+                    type="button"
+                    onClick={handleResumeSavedMatch}
+                    className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs tap-bounce flex items-center gap-1"
+                  >
+                    <Play className="w-3 h-3 fill-white" />
+                    <span>{seniorMode ? 'جاری رکھیں' : 'Resume'}</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleDiscardSavedMatch}
+                    className="p-1.5 rounded-xl bg-white border border-emerald-200 text-slate-500 hover:text-rose-600 tap-bounce"
+                    title="Discard saved match"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              </div>
+            )}
+
             {/* Feature Banner */}
             <div className="bg-gradient-to-br from-pink-50 to-rose-100 border border-pink-200 rounded-3xl p-4 text-center relative overflow-hidden shadow-xs">
               <div className="w-16 h-16 rounded-3xl bg-gradient-to-tr from-rose-500 to-amber-400 text-white flex items-center justify-center text-3xl mx-auto shadow-lg mb-2">
@@ -746,14 +750,14 @@ export const LudoGame: React.FC<LudoGameProps> = ({
               <p className="text-xs text-slate-600 max-w-xs mx-auto mt-1">
                 {seniorMode
                   ? 'اصلی قوانین: گوٹی کاٹنے پر بونس باری، محفوظ ستارے اور چھکہ رول!'
-                  : 'Authentic rules: Cut opponent tokens, safe star squares, 3D dice rolls & genuine reward points!'}
+                  : 'Authentic rules: Cut opponent tokens, safe star squares, bonus rolls & genuine reward points!'}
               </p>
-              <div className="flex items-center justify-center gap-3 mt-3 text-[11px] font-bold text-rose-700">
+              <div className="flex items-center justify-center gap-2 sm:gap-3 mt-3 text-[11px] font-bold text-rose-700 flex-wrap">
                 <span className="flex items-center gap-1 bg-white/80 px-2.5 py-1 rounded-full border border-pink-200">
                   <Star className="w-3 h-3 text-amber-500 fill-amber-500" /> Safe Stars
                 </span>
                 <span className="flex items-center gap-1 bg-white/80 px-2.5 py-1 rounded-full border border-pink-200">
-                  <Zap className="w-3 h-3 text-rose-500 fill-rose-500" /> Fast Play
+                  <Zap className="w-3 h-3 text-rose-500 fill-rose-500" /> Auto-Saved
                 </span>
                 <span className="flex items-center gap-1 bg-white/80 px-2.5 py-1 rounded-full border border-pink-200">
                   <Trophy className="w-3 h-3 text-amber-500 fill-amber-500" /> +50 to +100 Pts
@@ -782,9 +786,7 @@ export const LudoGame: React.FC<LudoGameProps> = ({
                   <h3 className="font-extrabold text-xs text-slate-900">
                     {seniorMode ? 'روبوٹ کے خلاف' : 'Vs Smart Bot'}
                   </h3>
-                  <p className="text-[10px] text-slate-500 mt-0.5">
-                    Single player vs AI
-                  </p>
+                  <p className="text-[10px] text-slate-500 mt-0.5">Single player vs AI</p>
                 </button>
 
                 <button
@@ -802,9 +804,7 @@ export const LudoGame: React.FC<LudoGameProps> = ({
                   <h3 className="font-extrabold text-xs text-slate-900">
                     {seniorMode ? 'دوستوں کے ساتھ' : 'Pass & Play'}
                   </h3>
-                  <p className="text-[10px] text-slate-500 mt-0.5">
-                    Play on same device
-                  </p>
+                  <p className="text-[10px] text-slate-500 mt-0.5">Play on same device</p>
                 </button>
               </div>
             </div>
@@ -824,7 +824,7 @@ export const LudoGame: React.FC<LudoGameProps> = ({
                       : 'border-slate-200 text-slate-600 bg-white'
                   }`}
                 >
-                  <span>🔴 vs 🟢</span> 2 Players
+                  <span>🔴 vs 🟡</span> 2 Players
                 </button>
                 <button
                   type="button"
@@ -891,7 +891,7 @@ export const LudoGame: React.FC<LudoGameProps> = ({
               className="w-full py-3.5 rounded-2xl bg-gradient-to-r from-rose-500 via-pink-500 to-rose-600 text-white font-black text-sm shadow-md tap-bounce flex items-center justify-center gap-2"
             >
               <Sparkles className="w-4 h-4" />
-              <span>{seniorMode ? 'کھیل شروع کریں (Start Ludo)' : 'Start Ludo Game'}</span>
+              <span>{seniorMode ? 'کھیل شروع کریں (Start Ludo)' : 'Start New Ludo Match'}</span>
               <ChevronRight className="w-4 h-4" />
             </button>
           </div>
@@ -901,39 +901,42 @@ export const LudoGame: React.FC<LudoGameProps> = ({
             {/* Status & Player Banners */}
             <div className="grid grid-cols-2 gap-2">
               {players.map((p, idx) => {
-                const isCurrent = idx === currentPlayerIdx;
+                const isCurrent = idx === currentPlayerIdx && !winner;
                 const homeTokensCount = p.tokens.filter((t) => t.step === 56).length;
+                const sortedIndicatorTokens = [...p.tokens]
+                  .sort((a, b) => b.step - a.step)
+                  .slice(0, effectiveTargetTokens);
+
                 return (
                   <div
                     key={p.color}
                     className={`rounded-2xl p-2 border-2 transition-all flex items-center justify-between ${
                       isCurrent
-                        ? `${COLOR_CONFIG[p.color].border} ${COLOR_CONFIG[p.color].lightBg} ring-2 ring-pink-300 shadow-xs scale-[1.02]`
+                        ? `${COLOR_CONFIG[p.color].border} ${COLOR_CONFIG[p.color].lightBg} ring-2 ring-pink-300 shadow-xs`
                         : 'border-slate-200 bg-white opacity-85'
                     }`}
                   >
-                    <div className="flex items-center gap-1.5">
+                    <div className="flex items-center gap-1.5 min-w-0">
                       <div
-                        className={`w-7 h-7 rounded-xl ${COLOR_CONFIG[p.color].bg} text-white flex items-center justify-center text-xs font-black shadow-xs`}
+                        className={`w-7 h-7 rounded-xl shrink-0 ${COLOR_CONFIG[p.color].bg} text-white flex items-center justify-center text-xs font-black shadow-xs`}
                       >
                         {p.avatar}
                       </div>
-                      <div className="leading-tight">
-                        <div className="text-[11px] font-extrabold text-slate-900 flex items-center gap-1">
-                          {p.name.split(' ')[0]}
+                      <div className="leading-tight min-w-0">
+                        <div className="text-[11px] font-extrabold text-slate-900 flex items-center gap-1 truncate">
+                          <span className="truncate">{p.name.split(' ')[0]}</span>
                           {isCurrent && (
-                            <span className="w-1.5 h-1.5 rounded-full bg-rose-500 animate-ping" />
+                            <span className="w-1.5 h-1.5 rounded-full bg-rose-500 animate-ping shrink-0" />
                           )}
                         </div>
                         <div className="text-[9.5px] text-slate-500">
-                          {homeTokensCount}/{targetTokensToWin} Home 🏁
+                          {homeTokensCount}/{effectiveTargetTokens} Home 🏁
                         </div>
                       </div>
                     </div>
 
-                    {/* Mini Token Status Indicators */}
-                    <div className="flex gap-0.5">
-                      {p.tokens.slice(0, targetTokensToWin).map((t) => (
+                    <div className="flex gap-0.5 shrink-0">
+                      {sortedIndicatorTokens.map((t) => (
                         <span
                           key={t.id}
                           className={`w-2.5 h-2.5 rounded-full border ${
@@ -955,17 +958,17 @@ export const LudoGame: React.FC<LudoGameProps> = ({
             </div>
 
             {/* Turn Announcement Banner */}
-            <div className="bg-slate-900 text-white rounded-2xl py-2 px-3 text-center shadow-xs flex items-center justify-between">
-              <div className="flex items-center gap-2 text-left">
-                <span className="text-base">
-                  {activePlayer ? COLOR_CONFIG[activePlayer.color].nameEn === 'Red' ? '🔴' : '🟢' : '🎲'}
+            <div className="bg-slate-900 text-white rounded-2xl py-2 px-3 text-center shadow-xs flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2 text-left min-w-0">
+                <span className="text-base shrink-0">
+                  {activePlayer ? COLOR_CONFIG[activePlayer.color].emoji : '🎲'}
                 </span>
                 <span className="text-xs font-black tracking-tight line-clamp-1">
                   {turnMessage}
                 </span>
               </div>
               {recentCaptureText && (
-                <span className="text-[10px] font-black text-amber-300 bg-amber-500/20 px-2 py-0.5 rounded-full border border-amber-400/30 animate-pulse">
+                <span className="text-[10px] font-black text-amber-300 bg-amber-500/20 px-2 py-0.5 rounded-full border border-amber-400/30 animate-pulse shrink-0">
                   Capture!
                 </span>
               )}
@@ -973,47 +976,46 @@ export const LudoGame: React.FC<LudoGameProps> = ({
 
             {/* 15x15 LUDO BOARD SVG CONTAINER */}
             <div className="w-full aspect-square max-w-[370px] mx-auto bg-amber-50/70 p-1 rounded-3xl border-4 border-slate-800 shadow-xl relative overflow-hidden select-none">
-              {/* Board Grid */}
               <svg
                 viewBox="0 0 1500 1500"
                 className="w-full h-full rounded-2xl"
                 style={{ touchAction: 'manipulation' }}
               >
-                {/* 1. YARD BASES (6x6 cells each = 600x600 px) */}
-                {/* Red Yard (Top-Left: 0..600, 0..600) */}
+                {/* 1. YARD BASES */}
                 <rect x="0" y="0" width="600" height="600" fill="#f43f5e" />
                 <rect x="100" y="100" width="400" height="400" rx="36" fill="#ffffff" />
-                {/* Green Yard (Top-Right: 900..1500, 0..600) */}
+
                 <rect x="900" y="0" width="600" height="600" fill="#10b981" />
                 <rect x="1000" y="100" width="400" height="400" rx="36" fill="#ffffff" />
-                {/* Blue Yard (Bottom-Left: 0..600, 900..1500) */}
+
                 <rect x="0" y="900" width="600" height="600" fill="#0284c7" />
                 <rect x="100" y="1000" width="400" height="400" rx="36" fill="#ffffff" />
-                {/* Yellow Yard (Bottom-Right: 900..1500, 900..1500) */}
+
                 <rect x="900" y="900" width="600" height="600" fill="#f59e0b" />
                 <rect x="1000" y="1000" width="400" height="400" rx="36" fill="#ffffff" />
 
-                {/* Yard Resting Circles */}
-                {/* Red Yard circles */}
-                <circle cx="200" cy="200" r="50" fill="#ffe4e6" stroke="#f43f5e" strokeWidth="6" />
-                <circle cx="400" cy="200" r="50" fill="#ffe4e6" stroke="#f43f5e" strokeWidth="6" />
-                <circle cx="200" cy="400" r="50" fill="#ffe4e6" stroke="#f43f5e" strokeWidth="6" />
-                <circle cx="400" cy="400" r="50" fill="#ffe4e6" stroke="#f43f5e" strokeWidth="6" />
-                {/* Green Yard circles */}
-                <circle cx="1100" cy="200" r="50" fill="#d1fae5" stroke="#10b981" strokeWidth="6" />
-                <circle cx="1300" cy="200" r="50" fill="#d1fae5" stroke="#10b981" strokeWidth="6" />
-                <circle cx="1100" cy="400" r="50" fill="#d1fae5" stroke="#10b981" strokeWidth="6" />
-                <circle cx="1300" cy="400" r="50" fill="#d1fae5" stroke="#10b981" strokeWidth="6" />
-                {/* Blue Yard circles */}
-                <circle cx="200" cy="1100" r="50" fill="#e0f2fe" stroke="#0284c7" strokeWidth="6" />
-                <circle cx="400" cy="1100" r="50" fill="#e0f2fe" stroke="#0284c7" strokeWidth="6" />
-                <circle cx="200" cy="1300" r="50" fill="#e0f2fe" stroke="#0284c7" strokeWidth="6" />
-                <circle cx="400" cy="1300" r="50" fill="#e0f2fe" stroke="#0284c7" strokeWidth="6" />
-                {/* Yellow Yard circles */}
-                <circle cx="1100" cy="1100" r="50" fill="#fef3c7" stroke="#f59e0b" strokeWidth="6" />
-                <circle cx="1300" cy="1100" r="50" fill="#fef3c7" stroke="#f59e0b" strokeWidth="6" />
-                <circle cx="1100" cy="1300" r="50" fill="#fef3c7" stroke="#f59e0b" strokeWidth="6" />
-                <circle cx="1300" cy="1300" r="50" fill="#fef3c7" stroke="#f59e0b" strokeWidth="6" />
+                {/* Yard Resting Circles (exact match to YARD_TOKEN_SVG_COORDS) */}
+                {(['red', 'green', 'blue', 'yellow'] as PlayerColor[]).map((color) => {
+                  const circleFill =
+                    color === 'red'
+                      ? '#ffe4e6'
+                      : color === 'green'
+                      ? '#d1fae5'
+                      : color === 'blue'
+                      ? '#e0f2fe'
+                      : '#fef3c7';
+                  return YARD_TOKEN_SVG_COORDS[color].map(([cx, cy], idx) => (
+                    <circle
+                      key={`yard-circle-${color}-${idx}`}
+                      cx={cx}
+                      cy={cy}
+                      r="52"
+                      fill={circleFill}
+                      stroke={COLOR_CONFIG[color].hex}
+                      strokeWidth="6"
+                    />
+                  ));
+                })}
 
                 {/* 2. 52 COMMON TRACK CELLS */}
                 {TRACK_COORDS.map(([r, c], idx) => {
@@ -1021,13 +1023,29 @@ export const LudoGame: React.FC<LudoGameProps> = ({
                   const isGreenStart = idx === 14;
                   const isYellowStart = idx === 27;
                   const isBlueStart = idx === 40;
+                  const isStartCell = isRedStart || isGreenStart || isYellowStart || isBlueStart;
                   const isSafe = SAFE_INDICES.has(idx);
 
                   let cellFill = '#ffffff';
-                  if (isRedStart) cellFill = '#ffe4e6';
-                  else if (isGreenStart) cellFill = '#d1fae5';
-                  else if (isYellowStart) cellFill = '#fef3c7';
-                  else if (isBlueStart) cellFill = '#e0f2fe';
+                  let starFill = '#f59e0b';
+                  let arrowChar = '';
+                  if (isRedStart) {
+                    cellFill = '#f43f5e';
+                    starFill = '#ffffff';
+                    arrowChar = '→';
+                  } else if (isGreenStart) {
+                    cellFill = '#10b981';
+                    starFill = '#ffffff';
+                    arrowChar = '↓';
+                  } else if (isYellowStart) {
+                    cellFill = '#f59e0b';
+                    starFill = '#ffffff';
+                    arrowChar = '←';
+                  } else if (isBlueStart) {
+                    cellFill = '#0284c7';
+                    starFill = '#ffffff';
+                    arrowChar = '↑';
+                  }
 
                   return (
                     <g key={`track-${idx}`}>
@@ -1040,74 +1058,49 @@ export const LudoGame: React.FC<LudoGameProps> = ({
                         stroke="#cbd5e1"
                         strokeWidth="2"
                       />
-                      {/* Star on Safe cells */}
-                      {isSafe && (
+                      {isSafe && !isStartCell && (
                         <text
                           x={c * 100 + 50}
-                          y={r * 100 + 64}
+                          y={r * 100 + 66}
                           textAnchor="middle"
-                          fontSize="42"
-                          fill="#f59e0b"
+                          fontSize="44"
+                          fill={starFill}
                           className="font-bold select-none"
                         >
                           ★
                         </text>
                       )}
-                      {/* Start Arrow Indicators */}
-                      {isRedStart && (
-                        <text
-                          x={c * 100 + 50}
-                          y={r * 100 + 82}
-                          textAnchor="middle"
-                          fontSize="26"
-                          fill="#f43f5e"
-                          fontWeight="bold"
-                        >
-                          🔴
-                        </text>
-                      )}
-                      {isGreenStart && (
-                        <text
-                          x={c * 100 + 50}
-                          y={r * 100 + 82}
-                          textAnchor="middle"
-                          fontSize="26"
-                          fill="#10b981"
-                          fontWeight="bold"
-                        >
-                          🟢
-                        </text>
-                      )}
-                      {isYellowStart && (
-                        <text
-                          x={c * 100 + 50}
-                          y={r * 100 + 82}
-                          textAnchor="middle"
-                          fontSize="26"
-                          fill="#f59e0b"
-                          fontWeight="bold"
-                        >
-                          🟡
-                        </text>
-                      )}
-                      {isBlueStart && (
-                        <text
-                          x={c * 100 + 50}
-                          y={r * 100 + 82}
-                          textAnchor="middle"
-                          fontSize="26"
-                          fill="#0284c7"
-                          fontWeight="bold"
-                        >
-                          🔵
-                        </text>
+                      {isStartCell && (
+                        <>
+                          <text
+                            x={c * 100 + 50}
+                            y={r * 100 + 54}
+                            textAnchor="middle"
+                            fontSize="36"
+                            fill="#ffffff"
+                            fontWeight="bold"
+                            className="select-none"
+                          >
+                            ★
+                          </text>
+                          <text
+                            x={c * 100 + 50}
+                            y={r * 100 + 88}
+                            textAnchor="middle"
+                            fontSize="26"
+                            fill="rgba(255,255,255,0.92)"
+                            fontWeight="900"
+                            className="select-none"
+                          >
+                            {arrowChar}
+                          </text>
+                        </>
                       )}
                     </g>
                   );
                 })}
 
-                {/* 3. HOME RUNWAYS (5 cells each) */}
-                {/* Red Runway: row 7, cols 1..5 */}
+                {/* 3. HOME RUNWAYS */}
                 {HOME_RUNWAYS.red.map(([r, c], idx) => (
                   <rect
                     key={`red-runway-${idx}`}
@@ -1120,7 +1113,6 @@ export const LudoGame: React.FC<LudoGameProps> = ({
                     strokeWidth="2"
                   />
                 ))}
-                {/* Green Runway: col 7, rows 1..5 */}
                 {HOME_RUNWAYS.green.map(([r, c], idx) => (
                   <rect
                     key={`green-runway-${idx}`}
@@ -1133,7 +1125,6 @@ export const LudoGame: React.FC<LudoGameProps> = ({
                     strokeWidth="2"
                   />
                 ))}
-                {/* Yellow Runway: row 7, cols 9..13 */}
                 {HOME_RUNWAYS.yellow.map(([r, c], idx) => (
                   <rect
                     key={`yellow-runway-${idx}`}
@@ -1146,7 +1137,6 @@ export const LudoGame: React.FC<LudoGameProps> = ({
                     strokeWidth="2"
                   />
                 ))}
-                {/* Blue Runway: col 7, rows 9..13 */}
                 {HOME_RUNWAYS.blue.map(([r, c], idx) => (
                   <rect
                     key={`blue-runway-${idx}`}
@@ -1160,136 +1150,138 @@ export const LudoGame: React.FC<LudoGameProps> = ({
                   />
                 ))}
 
-                {/* 4. CENTER FINISH TRIANGLES (rows 6..8, cols 6..8 = 600..900, 600..900) */}
-                {/* Center base square */}
+                {/* 4. CENTER FINISH TRIANGLES */}
                 <rect x="600" y="600" width="300" height="300" fill="#ffffff" stroke="#94a3b8" strokeWidth="3" />
-                {/* Red Triangle (Left) */}
                 <polygon points="600,600 750,750 600,900" fill="#f43f5e" />
-                {/* Green Triangle (Top) */}
                 <polygon points="600,600 750,750 900,600" fill="#10b981" />
-                {/* Yellow Triangle (Right) */}
                 <polygon points="900,600 750,750 900,900" fill="#f59e0b" />
-                {/* Blue Triangle (Bottom) */}
                 <polygon points="600,900 750,750 900,900" fill="#0284c7" />
-                {/* Center Crown / Trophy */}
-                <circle cx="750" cy="750" r="48" fill="#ffffff" stroke="#e2e8f0" strokeWidth="4" />
-                <text x="750" y="765" textAnchor="middle" fontSize="36" fill="#f59e0b">
+                <circle cx="750" cy="750" r="42" fill="#ffffff" stroke="#e2e8f0" strokeWidth="4" />
+                <text x="750" y="763" textAnchor="middle" fontSize="34" fill="#f59e0b" className="select-none">
                   👑
                 </text>
 
-                {/* 5. ALL ACTIVE TOKENS ON BOARD */}
-                {players.flatMap((p, pIdx) =>
-                  p.tokens.map((token) => {
-                    const [r, c] = getTokenCoords(token);
-                    const isMovable =
-                      pIdx === currentPlayerIdx &&
-                      movableTokenIds.includes(token.id) &&
-                      diceValue !== null &&
-                      !isRolling;
+                {/* 5A. FINISHED TOKENS */}
+                {finishedTokens.map(({ token, cx, cy }) => (
+                  <g key={`finished-token-${token.color}-${token.id}`}>
+                    <circle
+                      cx={cx}
+                      cy={cy}
+                      r="18"
+                      fill="#ffffff"
+                      stroke={COLOR_CONFIG[token.color].hex}
+                      strokeWidth="5"
+                    />
+                    <text
+                      x={cx}
+                      y={cy + 6}
+                      textAnchor="middle"
+                      fontSize="16"
+                      fontWeight="900"
+                      fill={COLOR_CONFIG[token.color].hex}
+                      className="select-none pointer-events-none"
+                    >
+                      ★
+                    </text>
+                  </g>
+                ))}
 
-                    const tokenColorHex = COLOR_CONFIG[token.color].hex;
-                    const cx = c * 100 + 50;
-                    const cy = r * 100 + 50;
+                {/* 5B. ACTIVE & YARD TOKENS */}
+                {renderedTokens.map(({ token, cx, cy, radius, isMovable }) => {
+                  const tokenColorHex = COLOR_CONFIG[token.color].hex;
+                  const canTapToken =
+                    isMovable && isHumanTurn && turnPhase === 'awaiting_move' && diceValue !== null;
 
-                    // If token reached Home
-                    if (token.step === 56) {
-                      return (
-                        <g key={`finished-token-${token.color}-${token.id}`}>
-                          <circle cx={cx} cy={cy} r="28" fill="#fbbf24" stroke="#78350f" strokeWidth="3" />
-                          <text x={cx} y={cy + 8} textAnchor="middle" fontSize="22">
-                            👑
-                          </text>
-                        </g>
-                      );
-                    }
+                  return (
+                    <g
+                      key={`token-${token.color}-${token.id}`}
+                      onClick={() => {
+                        if (canTapToken) {
+                          executeTokenMove(token.id);
+                        }
+                      }}
+                      style={{
+                        cursor: canTapToken ? 'pointer' : 'default',
+                      }}
+                    >
+                      {canTapToken && <circle cx={cx} cy={cy} r="54" fill="transparent" />}
 
-                    return (
-                      <g
-                        key={`token-${token.color}-${token.id}`}
-                        onClick={() => {
-                          if (isMovable && isHumanTurn && diceValue !== null) {
-                            executeTokenMove(token.id, diceValue);
-                          }
-                        }}
-                        style={{
-                          cursor: isMovable && isHumanTurn ? 'pointer' : 'default',
-                        }}
-                        className="transition-transform duration-300"
-                      >
-                        {/* Pulsing Highlight Ring when movable */}
-                        {isMovable && isHumanTurn && (
-                          <circle
-                            cx={cx}
-                            cy={cy}
-                            r="44"
-                            fill="none"
-                            stroke="#fbbf24"
-                            strokeWidth="8"
-                            strokeDasharray="12 6"
-                            className="animate-spin"
-                            style={{ transformOrigin: `${cx}px ${cy}px` }}
-                          />
-                        )}
-
-                        {/* Drop shadow */}
-                        <circle cx={cx + 3} cy={cy + 4} r="32" fill="rgba(0,0,0,0.25)" />
-
-                        {/* Token Outer Ring */}
+                      {canTapToken && (
                         <circle
                           cx={cx}
                           cy={cy}
-                          r="32"
-                          fill={tokenColorHex}
-                          stroke="#ffffff"
-                          strokeWidth="5"
+                          r={radius + 11}
+                          fill="none"
+                          stroke="#fbbf24"
+                          strokeWidth="7"
+                          strokeDasharray="12 6"
+                          className="animate-spin"
+                          style={{ transformOrigin: `${cx}px ${cy}px` }}
                         />
+                      )}
 
-                        {/* Inner Gradient Highlight */}
-                        <circle cx={cx - 6} cy={cy - 6} r="16" fill="rgba(255,255,255,0.45)" />
+                      <circle cx={cx + 2} cy={cy + 3} r={radius} fill="rgba(0,0,0,0.28)" />
 
-                        {/* Token Number / Star */}
-                        <text
-                          x={cx}
-                          y={cy + 8}
-                          textAnchor="middle"
-                          fontSize="24"
-                          fontWeight="900"
-                          fill="#ffffff"
-                          className="select-none pointer-events-none"
-                        >
-                          {token.step === -1 ? '●' : token.id + 1}
-                        </text>
-                      </g>
-                    );
-                  })
-                )}
+                      <circle
+                        cx={cx}
+                        cy={cy}
+                        r={radius}
+                        fill={tokenColorHex}
+                        stroke="#ffffff"
+                        strokeWidth={radius >= 28 ? 5 : 4}
+                      />
+
+                      <circle
+                        cx={cx - radius * 0.2}
+                        cy={cy - radius * 0.2}
+                        r={radius * 0.45}
+                        fill="rgba(255,255,255,0.42)"
+                      />
+
+                      <text
+                        x={cx}
+                        y={cy + Math.round(radius * 0.26)}
+                        textAnchor="middle"
+                        fontSize={Math.round(radius * 0.72)}
+                        fontWeight="900"
+                        fill="#ffffff"
+                        className="select-none pointer-events-none"
+                      >
+                        {token.step === -1 ? '●' : token.id + 1}
+                      </text>
+                    </g>
+                  );
+                })}
               </svg>
             </div>
 
-            {/* CONTROLS & 3D INTERACTIVE DICE */}
-            <div className="bg-slate-50 border border-slate-200/90 rounded-2xl p-2.5 flex items-center justify-between shadow-xs">
-              {/* Turn indicator info */}
-              <div className="flex items-center gap-2">
+            {/* CONTROLS & DICE */}
+            <div className="bg-slate-50 border border-slate-200/90 rounded-2xl p-2.5 flex items-center justify-between gap-2 shadow-xs">
+              <div className="flex items-center gap-2 min-w-0">
                 <div
-                  className={`w-10 h-10 rounded-2xl ${
+                  className={`w-10 h-10 rounded-2xl shrink-0 ${
                     activePlayer ? COLOR_CONFIG[activePlayer.color].bg : 'bg-slate-300'
                   } text-white flex items-center justify-center font-black text-sm shadow-xs`}
                 >
                   {activePlayer?.avatar || '🎲'}
                 </div>
-                <div>
-                  <h4 className="font-extrabold text-xs text-slate-900 leading-tight">
+                <div className="min-w-0">
+                  <h4 className="font-extrabold text-xs text-slate-900 leading-tight truncate">
                     {activePlayer?.name}
                   </h4>
-                  <p className="text-[10px] text-slate-500">
+                  <p className="text-[10px] text-slate-500 truncate">
                     {isHumanTurn
-                      ? diceValue === null
+                      ? turnPhase === 'awaiting_roll'
                         ? seniorMode
                           ? 'ڈائس رول کریں'
                           : 'Tap dice to roll'
+                        : turnPhase === 'awaiting_move'
+                        ? seniorMode
+                          ? 'گوٹی منتخب کریں'
+                          : 'Select highlighted token'
                         : seniorMode
-                        ? 'گوٹی منتخب کریں'
-                        : 'Select your token'
+                        ? 'باری تبدیل ہو رہی ہے...'
+                        : 'Updating turn...'
                       : seniorMode
                       ? 'روبوٹ سوچ رہا ہے...'
                       : 'Bot thinking...'}
@@ -1297,46 +1289,53 @@ export const LudoGame: React.FC<LudoGameProps> = ({
                 </div>
               </div>
 
-              {/* 3D Rolling Dice Box */}
-              <div className="flex items-center gap-3">
-                {/* Dice Button */}
+              <div className="flex items-center gap-2 shrink-0">
+                {isHumanTurn &&
+                  turnPhase === 'awaiting_move' &&
+                  diceValue !== null &&
+                  movableTokenIds.length === 1 &&
+                  !winner && (
+                    <button
+                      type="button"
+                      onClick={() => executeTokenMove(movableTokenIds[0])}
+                      className="px-3 py-2.5 rounded-xl bg-amber-400 hover:bg-amber-300 text-amber-950 font-black text-xs shadow-xs tap-bounce"
+                    >
+                      {seniorMode ? 'گوٹی چلائیں' : 'Move'}
+                    </button>
+                  )}
+
                 <button
                   type="button"
-                  disabled={!isHumanTurn || isRolling || diceValue !== null || !!winner}
+                  disabled={!canHumanRoll}
                   onClick={() => triggerDiceRoll()}
                   className={`w-14 h-14 rounded-2xl bg-white border-2 flex items-center justify-center transition-all tap-bounce relative select-none shadow-md ${
                     isRolling ? 'animate-bounce border-pink-400 rotate-12 scale-105' : ''
                   } ${
-                    isHumanTurn && diceValue === null && !isRolling && !winner
+                    canHumanRoll
                       ? 'border-rose-500 ring-4 ring-rose-400/40 cursor-pointer animate-pulse'
-                      : 'border-slate-300'
+                      : 'border-slate-300 opacity-85 cursor-not-allowed'
                   }`}
                   title="Roll Dice"
                 >
                   {isRolling ? (
                     <span className="text-2xl animate-spin">🎲</span>
                   ) : diceValue !== null ? (
-                    /* Render Crisp Dice Pips (1 to 6) */
                     <div className="w-10 h-10 grid grid-cols-3 grid-rows-3 p-1">
-                      {/* Pip 1: Center */}
                       {diceValue % 2 === 1 && (
                         <div className="col-start-2 row-start-2 w-2.5 h-2.5 rounded-full bg-slate-900 mx-auto my-auto" />
                       )}
-                      {/* Pips for 2, 3, 4, 5, 6 */}
                       {diceValue >= 2 && (
                         <>
                           <div className="col-start-1 row-start-1 w-2.5 h-2.5 rounded-full bg-slate-900" />
                           <div className="col-start-3 row-start-3 w-2.5 h-2.5 rounded-full bg-slate-900 ml-auto mt-auto" />
                         </>
                       )}
-                      {/* Pips for 4, 5, 6 */}
                       {diceValue >= 4 && (
                         <>
                           <div className="col-start-3 row-start-1 w-2.5 h-2.5 rounded-full bg-slate-900 ml-auto" />
                           <div className="col-start-1 row-start-3 w-2.5 h-2.5 rounded-full bg-slate-900 mt-auto" />
                         </>
                       )}
-                      {/* Extra pips for 6 */}
                       {diceValue === 6 && (
                         <>
                           <div className="col-start-1 row-start-2 w-2.5 h-2.5 rounded-full bg-slate-900 my-auto" />
@@ -1347,13 +1346,10 @@ export const LudoGame: React.FC<LudoGameProps> = ({
                   ) : (
                     <div className="flex flex-col items-center">
                       <span className="text-2xl">🎲</span>
-                      <span className="text-[8px] font-black text-rose-600 uppercase">
-                        ROLL
-                      </span>
+                      <span className="text-[8px] font-black text-rose-600 uppercase">ROLL</span>
                     </div>
                   )}
 
-                  {/* 6 Bonus Star indicator */}
                   {diceValue === 6 && (
                     <span className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-amber-400 text-amber-950 text-[10px] font-black flex items-center justify-center border border-white shadow-xs">
                       ★
@@ -1365,38 +1361,49 @@ export const LudoGame: React.FC<LudoGameProps> = ({
           </div>
         )}
 
-        {/* WINNER CELEBRATION MODAL */}
+        {/* WINNER / MATCH END MODAL */}
         {winner && (
           <div className="fixed inset-0 z-60 flex items-center justify-center bg-black/80 backdrop-blur-md p-4">
             <div className="bg-white rounded-3xl w-full max-w-sm p-6 text-center space-y-4 shadow-2xl border-4 border-amber-300 animate-scale-up">
               <div className="w-20 h-20 rounded-3xl bg-gradient-to-tr from-amber-400 to-yellow-200 text-amber-900 flex items-center justify-center text-4xl mx-auto shadow-lg animate-bounce">
-                👑
+                {winner.isBot ? winner.avatar : '👑'}
               </div>
 
               <div>
                 <span className="text-xs font-black px-3 py-1 rounded-full bg-amber-100 text-amber-800 uppercase tracking-wider">
-                  Victory!
+                  {winner.isBot ? 'Match Over' : 'Victory!'}
                 </span>
-                <h3 className="font-black text-2xl text-slate-900 mt-2">
-                  {winner.name} Won!
-                </h3>
+                <h3 className="font-black text-2xl text-slate-900 mt-2">{winner.name} Won!</h3>
                 <p className="text-xs text-slate-600 mt-1">
-                  {seniorMode
-                    ? `مبارک ہو! تمام ضروری ${targetTokensToWin} گوٹیاں کامیابی سے گھر پہنچ گئیں 🏆`
-                    : `Congratulations! First to safely bring ${targetTokensToWin} tokens Home!`}
+                  {winner.isBot
+                    ? seniorMode
+                      ? 'اس میچ میں روبوٹ جیت گیا۔ دوبارہ کوشش کریں!'
+                      : 'The Bot reached Home first this round. Play again to win the championship reward!'
+                    : seniorMode
+                    ? `مبارک ہو! تمام ضروری ${effectiveTargetTokens} گوٹیاں کامیابی سے گھر پہنچ گئیں 🏆`
+                    : `Congratulations! First to safely bring ${effectiveTargetTokens} tokens Home!`}
                 </p>
               </div>
 
-              {/* Reward Award Box */}
-              <div className="bg-gradient-to-r from-pink-50 to-amber-50 rounded-2xl p-3 border border-pink-200">
-                <span className="text-xs text-slate-500 font-bold">JoyPoints Reward</span>
-                <div className="text-xl font-black text-rose-600 mt-0.5">
-                  +{targetTokensToWin === 2 ? 50 : 100} JoyPoints 🪙
+              {!winner.isBot ? (
+                <div className="bg-gradient-to-r from-pink-50 to-amber-50 rounded-2xl p-3 border border-pink-200">
+                  <span className="text-xs text-slate-500 font-bold">JoyPoints Reward</span>
+                  <div className="text-xl font-black text-rose-600 mt-0.5">
+                    +{effectiveTargetTokens === 2 ? 50 : 100} JoyPoints 🪙
+                  </div>
+                  <p className="text-[10.5px] text-emerald-600 font-bold mt-0.5">
+                    ✓ Automatically added to your Redeemable Balance
+                  </p>
                 </div>
-                <p className="text-[10.5px] text-emerald-600 font-bold mt-0.5">
-                  ✓ Automatically added to your Redeemable Balance
-                </p>
-              </div>
+              ) : (
+                <div className="bg-slate-50 rounded-2xl p-3 border border-slate-200">
+                  <span className="text-xs text-slate-600 font-bold">
+                    {seniorMode
+                      ? 'جیت پر +50 / +100 پوائنٹس ملتے ہیں'
+                      : 'Win a match to earn +50 / +100 JoyPoints!'}
+                  </span>
+                </div>
+              )}
 
               <div className="grid grid-cols-2 gap-2 pt-1">
                 <button
@@ -1409,12 +1416,20 @@ export const LudoGame: React.FC<LudoGameProps> = ({
                 </button>
                 <button
                   type="button"
-                  onClick={onClose}
-                  className="py-3 rounded-2xl bg-gradient-to-r from-rose-500 to-pink-500 text-white font-extrabold text-xs shadow-md tap-bounce"
+                  onClick={handleBackToSetup}
+                  className="py-3 rounded-2xl bg-amber-100 hover:bg-amber-200 text-amber-950 font-extrabold text-xs shadow-xs tap-bounce"
                 >
-                  Return to Home
+                  Change Mode
                 </button>
               </div>
+
+              <button
+                type="button"
+                onClick={onClose}
+                className="w-full py-2.5 rounded-2xl bg-gradient-to-r from-rose-500 to-pink-500 text-white font-extrabold text-xs shadow-md tap-bounce"
+              >
+                Return to Home
+              </button>
             </div>
           </div>
         )}

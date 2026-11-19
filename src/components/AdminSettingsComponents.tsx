@@ -677,6 +677,7 @@ export const AdminSponsorPackagesPanel: React.FC = () => {
   const [isPopular, setIsPopular] = useState(false);
   const [saving, setSaving] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+  const [confirmDeletePkgId, setConfirmDeletePkgId] = useState<string | null>(null);
 
   const handleEditPackage = (pkg: SponsorPackage) => {
     soundService.playClick();
@@ -692,7 +693,12 @@ export const AdminSponsorPackagesPanel: React.FC = () => {
   };
 
   const handleDeletePackage = async (id: string) => {
-    if (!confirm('Are you sure you want to remove this sponsorship package?')) return;
+    if (confirmDeletePkgId !== id) {
+      soundService.playClick();
+      setConfirmDeletePkgId(id);
+      return;
+    }
+    setConfirmDeletePkgId(null);
     soundService.playClick();
     const next = packages.filter((p) => p.id !== id);
     setPackages(next);
@@ -919,10 +925,14 @@ export const AdminSponsorPackagesPanel: React.FC = () => {
               <button
                 type="button"
                 onClick={() => handleDeletePackage(pkg.id)}
-                className="w-7 h-7 rounded-lg bg-rose-950/60 text-rose-400 hover:text-rose-300 flex items-center justify-center tap-bounce"
-                title="Delete"
+                className={`px-2 h-7 rounded-lg flex items-center justify-center tap-bounce text-[10px] font-bold ${
+                  confirmDeletePkgId === pkg.id
+                    ? 'bg-rose-600 text-white'
+                    : 'bg-rose-950/60 text-rose-400 hover:text-rose-300'
+                }`}
+                title={confirmDeletePkgId === pkg.id ? 'Click again to remove package' : 'Delete'}
               >
-                <Trash2 className="w-3.5 h-3.5" />
+                {confirmDeletePkgId === pkg.id ? 'Confirm?' : <Trash2 className="w-3.5 h-3.5" />}
               </button>
             </div>
           </div>
@@ -968,7 +978,7 @@ export const AdminUsersManagerPanel: React.FC = () => {
 
     // Sensible fallback
     setUsers([
-      { uid: 'demo_user_1', displayName: 'Fatima Zahra', email: 'fatimakiduniya362@gmail.com', points: 0, role: 'admin' },
+      { uid: 'demo_user_1', displayName: 'Primary Owner', email: 'romeelajutt23@gmail.com', points: 0, role: 'admin' },
       { uid: 'demo_user_2', displayName: 'Ahmad Tariq', email: 'ahmad@example.com', points: 0, role: 'member' },
       { uid: 'demo_user_3', displayName: 'Zainab Bibi', email: 'zainab@example.com', points: 0, role: 'member' },
     ]);
@@ -1180,6 +1190,8 @@ export const AdminSponsorRequestsPanel: React.FC = () => {
   const [targetReach, setTargetReach] = useState<number>(20000);
   const [submittingAction, setSubmittingAction] = useState(false);
   const [actionNotice, setActionNotice] = useState<string | null>(null);
+  const [rejectingReqId, setRejectingReqId] = useState<string | null>(null);
+  const [rejectReasonText, setRejectReasonText] = useState('Does not meet family-friendly guidelines');
 
   const fetchRequests = async () => {
     setLoading(true);
@@ -1230,16 +1242,17 @@ export const AdminSponsorRequestsPanel: React.FC = () => {
   };
 
   const handleReject = async (req: SponsorRequest) => {
-    const reason = prompt('Optional reason for rejection (sent to records):', 'Does not meet family-friendly guidelines');
-    if (reason === null) return;
+    const reason = rejectReasonText.trim() || 'Does not meet family-friendly guidelines';
     soundService.playClick();
     try {
       await rejectSponsorRequest(req.id, reason);
       success();
+      setRejectingReqId(null);
+      setActionNotice(`Rejected sponsor request from "${req.businessName}".`);
       await fetchRequests();
     } catch (err: any) {
       warning();
-      alert('Error rejecting: ' + err.message);
+      setActionNotice('Error rejecting: ' + (err?.message || 'Unknown error'));
     }
   };
 
@@ -1347,22 +1360,58 @@ export const AdminSponsorRequestsPanel: React.FC = () => {
               </div>
 
               {req.status === 'pending' && (
-                <div className="flex gap-2 pt-1">
-                  <button
-                    type="button"
-                    onClick={() => handleOpenApproveModal(req)}
-                    className="flex-1 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl tap-bounce flex items-center justify-center gap-1 shadow-xs"
-                  >
-                    <CheckCircle2 className="w-3.5 h-3.5" />
-                    <span>Approve & Set Schedule</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handleReject(req)}
-                    className="px-3 py-1.5 bg-rose-950/80 hover:bg-rose-900 text-rose-300 font-bold rounded-xl tap-bounce border border-rose-800"
-                  >
-                    Reject
-                  </button>
+                <div className="space-y-2 pt-1">
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => handleOpenApproveModal(req)}
+                      className="flex-1 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl tap-bounce flex items-center justify-center gap-1 shadow-xs"
+                    >
+                      <CheckCircle2 className="w-3.5 h-3.5" />
+                      <span>Approve & Set Schedule</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        soundService.playClick();
+                        setRejectReasonText('Does not meet family-friendly guidelines');
+                        setRejectingReqId(rejectingReqId === req.id ? null : req.id);
+                      }}
+                      className="px-3 py-1.5 bg-rose-950/80 hover:bg-rose-900 text-rose-300 font-bold rounded-xl tap-bounce border border-rose-800"
+                    >
+                      Reject
+                    </button>
+                  </div>
+
+                  {rejectingReqId === req.id && (
+                    <div className="p-2.5 bg-slate-900 border border-rose-800/70 rounded-xl space-y-2">
+                      <label className="text-[10px] font-bold text-rose-300 block">
+                        Rejection reason (saved to records):
+                      </label>
+                      <input
+                        type="text"
+                        value={rejectReasonText}
+                        onChange={(e) => setRejectReasonText(e.target.value)}
+                        className="w-full px-2.5 py-1.5 bg-slate-950 border border-slate-700 rounded-lg text-white text-xs"
+                      />
+                      <div className="flex gap-2 justify-end">
+                        <button
+                          type="button"
+                          onClick={() => setRejectingReqId(null)}
+                          className="px-2.5 py-1 bg-slate-800 text-slate-300 rounded-lg font-bold text-[11px]"
+                        >
+                          Cancel
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleReject(req)}
+                          className="px-2.5 py-1 bg-rose-600 hover:bg-rose-500 text-white rounded-lg font-bold text-[11px]"
+                        >
+                          Confirm Reject
+                        </button>
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
             </div>
@@ -1468,6 +1517,7 @@ export const AdminLearnManagerPanel: React.FC = () => {
 
   // New question form
   const [showAddQuiz, setShowAddQuiz] = useState(false);
+  const [confirmDeleteQuestionId, setConfirmDeleteQuestionId] = useState<string | null>(null);
   const [qText, setQText] = useState('');
   const [qUrdu, setQUrdu] = useState('');
   const [opt0, setOpt0] = useState('');
@@ -1513,7 +1563,12 @@ export const AdminLearnManagerPanel: React.FC = () => {
   };
 
   const handleDeleteQuestion = async (id: string) => {
-    if (!confirm('Delete this question?')) return;
+    if (confirmDeleteQuestionId !== id) {
+      soundService.playClick();
+      setConfirmDeleteQuestionId(id);
+      return;
+    }
+    setConfirmDeleteQuestionId(null);
     const next = customQuestions.filter((q) => q.id !== id);
     setCustomQuestions(next);
     try {
@@ -1713,9 +1768,14 @@ export const AdminLearnManagerPanel: React.FC = () => {
                 <button
                   type="button"
                   onClick={() => handleDeleteQuestion(q.id)}
-                  className="w-7 h-7 rounded-lg bg-rose-950/60 text-rose-400 hover:text-rose-300 flex items-center justify-center tap-bounce"
+                  className={`px-2 h-7 rounded-lg flex items-center justify-center tap-bounce text-[10px] font-bold ${
+                    confirmDeleteQuestionId === q.id
+                      ? 'bg-rose-600 text-white'
+                      : 'bg-rose-950/60 text-rose-400 hover:text-rose-300'
+                  }`}
+                  title={confirmDeleteQuestionId === q.id ? 'Click again to delete' : 'Delete question'}
                 >
-                  <Trash2 className="w-3.5 h-3.5" />
+                  {confirmDeleteQuestionId === q.id ? 'Confirm?' : <Trash2 className="w-3.5 h-3.5" />}
                 </button>
               </div>
             ))}

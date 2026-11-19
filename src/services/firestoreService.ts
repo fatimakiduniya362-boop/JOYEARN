@@ -7,9 +7,13 @@
 
 import {
   getFirestore,
+  initializeFirestore,
+  persistentLocalCache,
+  persistentMultipleTabManager,
   doc,
   setDoc,
   getDoc,
+  getDocFromServer,
   collection,
   addDoc,
   getDocs,
@@ -22,12 +26,29 @@ import {
   startAfter,
   runTransaction,
   writeBatch,
-  DocumentSnapshot,
   Firestore
 } from 'firebase/firestore';
 import { getApps, initializeApp, getApp } from 'firebase/app';
+import { getStorage, FirebaseStorage } from 'firebase/storage';
 import firebaseConfig from '../../firebase-applet-config.json';
 import { WithdrawalRequest, WithdrawalStatus } from '../types';
+
+type AtomicPointsTxHandler = (params: {
+  uid: string;
+  txId: string;
+  pointsDelta: number;
+  reason: string;
+  activityRef: string;
+  email?: string | null;
+  displayName?: string | null;
+  streakDays?: number;
+}) => Promise<{ status: string }>;
+
+let registeredAtomicPointsTxHandler: AtomicPointsTxHandler | null = null;
+
+export function registerAtomicPointsTxHandler(handler: AtomicPointsTxHandler): void {
+  registeredAtomicPointsTxHandler = handler;
+}
 import {
   MIN_WITHDRAW_USD,
   MAX_WITHDRAW_USD_PER_REQUEST,
@@ -86,16 +107,78 @@ export const USER_WALLET_CACHE_TTL = 10 * 60 * 1000; // 10 minutes for user's ow
 export const USER_TASKS_CACHE_TTL = 10 * 60 * 1000;  // 10 minutes for user's completed tasks
 
 let firestoreInstance: Firestore | null = null;
+let storageInstance: FirebaseStorage | null = null;
+let connectionTestRun = false;
+
+function getOrInitFirebaseApp() {
+  return getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
+}
 
 export function getFirestoreDB(): Firestore | null {
   if (firestoreInstance) return firestoreInstance;
   try {
-    const app = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
-    firestoreInstance = getFirestore(app);
+    const app = getOrInitFirebaseApp();
+    try {
+      // Auto-detect long polling prevents WebChannel offline errors inside iframes,
+      // Android WebViews, and restrictive mobile networks while keeping persistent cache.
+      firestoreInstance = initializeFirestore(app, {
+        experimentalAutoDetectLongPolling: true,
+        localCache: persistentLocalCache({
+          tabManager: persistentMultipleTabManager(),
+        }),
+      });
+    } catch {
+      // If Firestore was already initialized in this JS context, reuse existing instance
+      firestoreInstance = getFirestore(app);
+    }
+
+    if (!connectionTestRun) {
+      connectionTestRun = true;
+      void testFirestoreConnection();
+    }
     return firestoreInstance;
   } catch (err) {
     console.warn('Firestore initialization warning (using local fallback):', err);
     return null;
+  }
+}
+
+export function getFirebaseStorage(): FirebaseStorage | null {
+  if (storageInstance) return storageInstance;
+  try {
+    const app = getOrInitFirebaseApp();
+    storageInstance = getStorage(app);
+    return storageInstance;
+  } catch (err) {
+    console.warn('Firebase Storage initialization error:', err);
+    return null;
+  }
+}
+
+/**
+ * Verifies real server connectivity to Firestore using getDocFromServer.
+ * Does not falsely report online status if the client is offline or unreachable.
+ */
+export async function testFirestoreConnection(): Promise<{ online: boolean; reason?: string }> {
+  connectionTestRun = true;
+  const db = firestoreInstance || getFirestoreDB();
+  if (!db) {
+    return { online: false, reason: 'Firestore is not initialized.' };
+  }
+  try {
+    await getDocFromServer(doc(db, 'test', 'connection'));
+    return { online: true };
+  } catch (error: any) {
+    const msg = error instanceof Error ? error.message : String(error);
+    if (msg.includes('the client is offline') || error?.code === 'unavailable') {
+      console.warn('Firestore connectivity check: client appears offline or network blocked.', msg);
+      return { online: false, reason: msg };
+    }
+    // A missing document or permission response still proves server round-trip succeeded
+    if (error?.code === 'permission-denied' || error?.code === 'not-found') {
+      return { online: true };
+    }
+    return { online: false, reason: msg };
   }
 }
 
@@ -168,9 +251,139 @@ export function canPerformFirestoreWrite(userId: string): boolean {
 export function queueWriteLocally(action: { type: string; payload: any; timestamp: number }): void {
   try {
     const queue = JSON.parse(localStorage.getItem('joyearn_pending_write_queue') || '[]');
-    queue.push(action);
-    localStorage.setItem('joyearn_pending_write_queue', JSON.stringify(queue));
+    // Deduplicate repeated syncUserData, syncLearningStreak, or syncNotificationPreferences actions for the same uid
+    const filtered =
+      action.type === 'syncUserData' ||
+      action.type === 'syncLearningStreak' ||
+      action.type === 'syncNotificationPreferences'
+        ? queue.filter((q: any) => !(q.type === action.type && q.payload?.uid === action.payload?.uid))
+        : queue;
+    filtered.push(action);
+    localStorage.setItem('joyearn_pending_write_queue', JSON.stringify(filtered.slice(-50)));
   } catch {}
+}
+
+export function getPendingWriteQueueCount(): number {
+  if (typeof window === 'undefined') return 0;
+  try {
+    const queue = JSON.parse(localStorage.getItem('joyearn_pending_write_queue') || '[]');
+    return Array.isArray(queue) ? queue.length : 0;
+  } catch {
+    return 0;
+  }
+}
+
+/**
+ * Safely flushes queued offline writes to Firestore when connectivity returns.
+ * Never processes offline withdrawals (withdrawals strictly require live server verification).
+ */
+export async function flushOfflineWriteQueue(): Promise<{ synced: number; remaining: number }> {
+  if (typeof window === 'undefined') return { synced: 0, remaining: 0 };
+  const db = getFirestoreDB();
+  if (!db) return { synced: 0, remaining: getPendingWriteQueueCount() };
+
+  let queue: Array<{ type: string; payload: any; timestamp: number }> = [];
+  try {
+    queue = JSON.parse(localStorage.getItem('joyearn_pending_write_queue') || '[]');
+  } catch {
+    return { synced: 0, remaining: 0 };
+  }
+  if (!Array.isArray(queue) || queue.length === 0) return { synced: 0, remaining: 0 };
+
+  const remaining: Array<{ type: string; payload: any; timestamp: number }> = [];
+  let synced = 0;
+
+  for (const item of queue) {
+    try {
+      if (item.type === 'syncUserData' && item.payload?.uid) {
+        const ok = await syncUserDataToCloud(item.payload.uid, item.payload.data || {});
+        if (ok) synced++;
+        else remaining.push(item);
+      } else if (item.type === 'recordTask' && item.payload?.userId && item.payload?.taskId) {
+        const taskRecordId = `${item.payload.dateStr}_${item.payload.taskId}`;
+        const taskRef = doc(db, 'users', item.payload.userId, 'completed_tasks', taskRecordId);
+        await setDoc(taskRef, {
+          userId: item.payload.userId,
+          taskId: item.payload.taskId,
+          date: item.payload.dateStr,
+          completedAt: new Date(item.timestamp || Date.now()).toISOString(),
+        });
+        synced++;
+      } else if (item.type === 'claimWelcomeBonus' && item.payload?.uid) {
+        await claimWelcomeBonusInFirestore(item.payload.uid, item.payload.email || null, item.payload.displayName || null);
+        synced++;
+      } else if (item.type === 'syncLearningStreak' && item.payload?.uid) {
+        const streakRef = doc(db, 'users', item.payload.uid, 'learning_streak', 'state');
+        const existingSnap = await getDoc(streakRef);
+        const existingData = existingSnap.exists() ? existingSnap.data() : {};
+        const cloudDates: string[] = Array.isArray(existingData.completedDates) ? existingData.completedDates : [];
+        const queuedDates: string[] = Array.isArray(item.payload.completedDates) ? item.payload.completedDates : [];
+        const mergedDates = Array.from(new Set([...cloudDates, ...queuedDates])).sort();
+        const cloudBest = typeof existingData.bestStreak === 'number' ? existingData.bestStreak : 0;
+        const queuedBest = typeof item.payload.bestStreak === 'number' ? item.payload.bestStreak : 0;
+        const cloudMilestones: number[] = Array.isArray(existingData.claimedMilestones) ? existingData.claimedMilestones : [];
+        const queuedMilestones: number[] = Array.isArray(item.payload.claimedMilestones) ? item.payload.claimedMilestones : [];
+        const mergedMilestones = Array.from(new Set([...cloudMilestones, ...queuedMilestones])).sort((a, b) => a - b);
+
+        await setDoc(
+          streakRef,
+          {
+            uid: item.payload.uid,
+            completedDates: mergedDates,
+            bestStreak: Math.max(cloudBest, queuedBest),
+            claimedMilestones: mergedMilestones,
+            lastCompletedDate: mergedDates.length > 0 ? mergedDates[mergedDates.length - 1] : null,
+            lastActivityLabel: item.payload.lastActivityLabel || existingData.lastActivityLabel || 'Daily Learning',
+            updatedAt: new Date().toISOString(),
+          },
+          { merge: true }
+        );
+        synced++;
+      } else if (item.type === 'syncNotificationPreferences' && item.payload?.uid && item.payload?.prefs) {
+        const prefRef = doc(db, 'users', item.payload.uid, 'notification_settings', 'preferences');
+        await setDoc(
+          prefRef,
+          {
+            ...item.payload.prefs,
+            uid: item.payload.uid,
+            updatedAt: item.payload.prefs.updatedAt || new Date().toISOString(),
+          },
+          { merge: true }
+        );
+        synced++;
+      } else if (item.type === 'atomicPointsTx' && item.payload?.uid && item.payload?.txId) {
+        if (!registeredAtomicPointsTxHandler) {
+          remaining.push(item);
+          continue;
+        }
+        const res = await registeredAtomicPointsTxHandler({
+          uid: item.payload.uid,
+          txId: item.payload.txId,
+          pointsDelta: item.payload.pointsDelta,
+          reason: item.payload.reason || 'Offline reward sync',
+          activityRef: item.payload.activityRef || 'offline_sync',
+          email: item.payload.email || null,
+          displayName: item.payload.displayName || null,
+          streakDays: item.payload.streakDays,
+        });
+        if (res.status === 'committed' || res.status === 'duplicate') {
+          synced++;
+        } else if (res.status === 'queued_offline') {
+          remaining.push(item);
+        }
+      } else if (item.type === 'submitWithdrawal') {
+        // Security rule: never auto-submit offline withdrawals without live user confirmation
+        continue;
+      }
+    } catch {
+      remaining.push(item);
+    }
+  }
+
+  try {
+    localStorage.setItem('joyearn_pending_write_queue', JSON.stringify(remaining));
+  } catch {}
+  return { synced, remaining: remaining.length };
 }
 
 export interface UserCloudData {
@@ -180,10 +393,12 @@ export interface UserCloudData {
   points: number;
   streakDays: number;
   todayPoints: number;
+  totalEarned?: number;
   lastActiveDate: string;
   updatedAt: string;
   welcomeBonusClaimed?: boolean;
   welcomeBonusClaimedAt?: string;
+  localDirty?: boolean;
 }
 
 /**
@@ -299,25 +514,101 @@ export async function claimWelcomeBonusInFirestore(
 }
 
 /**
- * Saves user points and streak to Firestore in a single batched/atomic write
+ * Records a unique, immutable reward transaction in `/users/{uid}/reward_ledger/{txId}`
+ * and local storage to guarantee duplicate rewards are never issued and earned points
+ * remain permanently protected across daily resets and logouts.
+ */
+export async function recordPermanentRewardTransaction(
+  uid: string,
+  txId: string,
+  pointsAwarded: number,
+  reason: string,
+  source: string = 'activity'
+): Promise<{ recorded: boolean; alreadyClaimed: boolean }> {
+  const cleanTxId = txId.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 100);
+  const ledgerKey = `joyearn_reward_ledger_${uid || 'guest'}`;
+
+  try {
+    const raw = localStorage.getItem(ledgerKey);
+    const seen: Record<string, { points: number; reason: string; at: string }> = raw ? JSON.parse(raw) : {};
+    if (seen[cleanTxId]) {
+      return { recorded: false, alreadyClaimed: true };
+    }
+    seen[cleanTxId] = { points: pointsAwarded, reason, at: new Date().toISOString() };
+    localStorage.setItem(ledgerKey, JSON.stringify(seen));
+  } catch {}
+
+  if (!uid || uid === 'guest') {
+    return { recorded: true, alreadyClaimed: false };
+  }
+
+  const db = getFirestoreDB();
+  if (db) {
+    try {
+      const txRef = doc(db, 'users', uid, 'reward_ledger', cleanTxId);
+      const result = await runTransaction(db, async (tx) => {
+        const existing = await tx.get(txRef);
+        if (existing.exists()) {
+          return { recorded: false, alreadyClaimed: true };
+        }
+        tx.set(txRef, {
+          txId: cleanTxId,
+          uid,
+          points: pointsAwarded,
+          reason,
+          source,
+          createdAt: new Date().toISOString(),
+        });
+        return { recorded: true, alreadyClaimed: false };
+      });
+      return result;
+    } catch (err) {
+      if (isQuotaOrResourceExhausted(err)) notifyServerBusy();
+      // Keep local duplicate guard active if offline
+      return { recorded: true, alreadyClaimed: false };
+    }
+  }
+  return { recorded: true, alreadyClaimed: false };
+}
+
+/**
+ * Saves user points and streak to Firestore using a transaction so stale offline
+ * data NEVER overwrites newer/higher server points (unless allowPointsDecrease is
+ * explicitly true for a verified withdrawal deduction).
  */
 export async function syncUserDataToCloud(
   uid: string,
-  data: Partial<UserCloudData>
+  data: Partial<UserCloudData>,
+  options?: { allowPointsDecrease?: boolean }
 ): Promise<boolean> {
-  const payload = {
-    ...data,
-    updatedAt: new Date().toISOString(),
-  };
+  const cacheKey = `joyearn_cloud_user_${uid}`;
+  const timeKey = `joyearn_cloud_user_time_${uid}`;
+  let existingLocal: Partial<UserCloudData> = {};
 
   try {
-    localStorage.setItem(`joyearn_cloud_user_${uid}`, JSON.stringify(payload));
+    const raw = localStorage.getItem(cacheKey);
+    if (raw) {
+      existingLocal = JSON.parse(raw);
+    }
+  } catch {}
+
+  const cloudPayload = {
+    ...existingLocal,
+    ...data,
+    uid,
+    updatedAt: new Date().toISOString(),
+  };
+  delete (cloudPayload as any).localDirty;
+
+  // Save locally first with localDirty=true until cloud write succeeds
+  try {
+    localStorage.setItem(cacheKey, JSON.stringify({ ...cloudPayload, localDirty: true }));
   } catch {}
 
   if (!uid) return false;
 
   if (!canPerformFirestoreWrite(uid)) {
-    queueWriteLocally({ type: 'syncUserData', payload: { uid, data: payload }, timestamp: Date.now() });
+    queueWriteLocally({ type: 'syncUserData', payload: { uid, data: cloudPayload }, timestamp: Date.now() });
     return true;
   }
 
@@ -325,15 +616,45 @@ export async function syncUserDataToCloud(
   if (db) {
     try {
       const userRef = doc(db, 'users', uid);
-      await setDoc(userRef, payload, { merge: true });
+      const finalMerged = await runTransaction(db, async (tx) => {
+        const snap = await tx.get(userRef);
+        const serverData = snap.exists() ? (snap.data() as Partial<UserCloudData>) : {};
+        const serverPoints = typeof serverData.points === 'number' ? serverData.points : 0;
+        const incomingPoints = typeof cloudPayload.points === 'number' ? cloudPayload.points : serverPoints;
+
+        const safePoints = options?.allowPointsDecrease
+          ? Math.max(0, incomingPoints)
+          : Math.max(serverPoints, incomingPoints);
+
+        const safeStreak = Math.max(
+          typeof serverData.streakDays === 'number' ? serverData.streakDays : 0,
+          typeof cloudPayload.streakDays === 'number' ? cloudPayload.streakDays : 0
+        );
+
+        const mergedPayload = {
+          ...serverData,
+          ...cloudPayload,
+          points: safePoints,
+          streakDays: safeStreak,
+          updatedAt: new Date().toISOString(),
+        };
+        tx.set(userRef, mergedPayload, { merge: true });
+        return mergedPayload;
+      });
+
       incrementDailyWriteCount(uid);
+      try {
+        localStorage.setItem(cacheKey, JSON.stringify({ ...finalMerged, localDirty: false }));
+        localStorage.setItem(timeKey, String(Date.now()));
+      } catch {}
       return true;
     } catch (err) {
       if (isQuotaOrResourceExhausted(err)) {
         notifyServerBusy();
-        queueWriteLocally({ type: 'syncUserData', payload: { uid, data: payload }, timestamp: Date.now() });
       }
-      console.warn('Could not sync to cloud Firestore, local storage active:', err);
+      // Always queue failed cloud writes on any transient/network error so points are never lost
+      queueWriteLocally({ type: 'syncUserData', payload: { uid, data: cloudPayload }, timestamp: Date.now() });
+      console.warn('Could not sync to cloud Firestore, queued for retry:', err);
       return false;
     }
   }
@@ -341,7 +662,8 @@ export async function syncUserDataToCloud(
 }
 
 /**
- * Loads user points and streak from Firestore with 10-minute cache TTL
+ * Loads user points and streak from Firestore with 10-minute cache TTL.
+ * Never lets an empty or stale cloud doc overwrite newer un-synced local points.
  */
 export async function loadUserDataFromCloud(uid: string, forceRefresh = false): Promise<UserCloudData | null> {
   if (!uid) return null;
@@ -350,12 +672,21 @@ export async function loadUserDataFromCloud(uid: string, forceRefresh = false): 
   const timeKey = `joyearn_cloud_user_time_${uid}`;
   const now = Date.now();
 
-  if (!forceRefresh) {
+  let localCached: UserCloudData | null = null;
+  try {
+    const cached = localStorage.getItem(cacheKey);
+    if (cached) localCached = JSON.parse(cached);
+  } catch {}
+
+  // If local data has unsynced edits or is still inside cache TTL, return it immediately
+  if (!forceRefresh && localCached) {
+    if (localCached.localDirty) {
+      return localCached;
+    }
     try {
       const lastTime = parseInt(localStorage.getItem(timeKey) || '0', 10);
       if (now - lastTime < USER_WALLET_CACHE_TTL) {
-        const cached = localStorage.getItem(cacheKey);
-        if (cached) return JSON.parse(cached);
+        return localCached;
       }
     } catch {}
   }
@@ -367,7 +698,18 @@ export async function loadUserDataFromCloud(uid: string, forceRefresh = false): 
       const snap = await getDoc(userRef);
       if (snap.exists()) {
         const cloudData = snap.data() as UserCloudData;
-        localStorage.setItem(cacheKey, JSON.stringify(cloudData));
+        // If local has higher/dirty points from recent offline activity, preserve local points
+        if (localCached?.localDirty && typeof localCached.points === 'number') {
+          const merged: UserCloudData = {
+            ...cloudData,
+            ...localCached,
+            points: Math.max(cloudData.points || 0, localCached.points),
+          };
+          localStorage.setItem(cacheKey, JSON.stringify(merged));
+          localStorage.setItem(timeKey, String(now));
+          return merged;
+        }
+        localStorage.setItem(cacheKey, JSON.stringify({ ...cloudData, localDirty: false }));
         localStorage.setItem(timeKey, String(now));
         return cloudData;
       }
@@ -379,12 +721,7 @@ export async function loadUserDataFromCloud(uid: string, forceRefresh = false): 
     }
   }
 
-  try {
-    const saved = localStorage.getItem(cacheKey);
-    if (saved) return JSON.parse(saved);
-  } catch {}
-
-  return null;
+  return localCached;
 }
 
 export function maskAccountDetails(method: string, account: string): string {
@@ -427,7 +764,6 @@ export async function submitWithdrawalRequestToCloud(
   request: Omit<WithdrawalRequest, 'id' | 'createdAt'>
 ): Promise<WithdrawalRequest> {
   const userUid = request.userUid || 'device_user';
-  const pointsToDeduct = request.points;
   const now = new Date();
   const currentMonth = now.toISOString().slice(0, 7);
   const newId = 'wd_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7);
@@ -521,16 +857,28 @@ export async function submitWithdrawalRequestToCloud(
       } catch (err: any) {
         if (isQuotaOrResourceExhausted(err)) {
           notifyServerBusy();
-          queueWriteLocally({ type: 'submitWithdrawal', payload: fullRequest, timestamp: Date.now() });
         }
-        console.warn('Firestore transaction error:', err);
-        if (err?.message?.includes('Insufficient') || err?.message?.includes('in progress') || err?.message?.includes('Monthly limit')) {
+        console.warn('Firestore withdrawal transaction error:', err);
+        if (
+          err?.message?.includes('Insufficient') ||
+          err?.message?.includes('in progress') ||
+          err?.message?.includes('Monthly limit')
+        ) {
           throw err;
         }
+        throw new Error(
+          'Could not verify your withdrawal with the server right now. Please check your connection and try again. No balance was deducted.'
+        );
       }
     } else {
-      queueWriteLocally({ type: 'submitWithdrawal', payload: fullRequest, timestamp: Date.now() });
+      throw new Error(
+        'Withdrawals require a live server connection for security verification. Please try again when your connection is restored.'
+      );
     }
+  } else {
+    throw new Error(
+      'Withdrawals require an active connection to the server. Offline withdrawal requests are not allowed.'
+    );
   }
 
   // Deduct from local storage mirror as well

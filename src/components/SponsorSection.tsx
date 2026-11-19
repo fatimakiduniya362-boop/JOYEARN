@@ -30,6 +30,7 @@ interface SponsorSectionProps {
 
 export const SponsorSection: React.FC<SponsorSectionProps> = ({
   seniorMode = false,
+  onOpenAdvertiseModal,
   isStandalonePage = false,
   onBackToHome,
 }) => {
@@ -139,7 +140,7 @@ export const SponsorSection: React.FC<SponsorSectionProps> = ({
       }, 2500);
     } catch (err) {
       console.warn('Error submitting sponsor request:', err);
-      setFormError('Failed to submit request. Please check your connection and try again.');
+      setFormError('Unable to reach server right now. Please try again later.');
     } finally {
       setSubmitting(false);
     }
@@ -182,16 +183,16 @@ export const SponsorSection: React.FC<SponsorSectionProps> = ({
   const content = (
     <div className="space-y-4 max-w-lg mx-auto w-full">
       {/* 1. Header Bar */}
-      <div className="bg-gradient-to-r from-purple-900/90 via-slate-900 to-indigo-950/90 rounded-3xl p-4 sm:p-5 border border-purple-500/30 shadow-md text-white flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <div className="w-11 h-11 rounded-2xl bg-purple-600/30 border border-purple-400/40 flex items-center justify-center text-2xl shadow-inner">
+      <div className="bg-gradient-to-r from-purple-900/90 via-slate-900 to-indigo-950/90 rounded-3xl p-4 sm:p-5 border border-purple-500/30 shadow-md text-white flex items-center justify-between gap-2">
+        <div className="flex items-center gap-3 min-w-0">
+          <div className="w-11 h-11 rounded-2xl bg-purple-600/30 border border-purple-400/40 flex items-center justify-center text-2xl shadow-inner shrink-0">
             📢
           </div>
-          <div>
+          <div className="min-w-0">
             <h3 className="font-black text-sm sm:text-base leading-tight">
-              {seniorMode ? 'اسپانسرز (Sponsors)' : 'Sponsors & Brand Partners'}
+              {seniorMode ? 'اسپانسرڈ (Sponsored)' : 'Sponsored'}
             </h3>
-            <p className="text-[11px] text-purple-200/80 font-medium mt-0.5">
+            <p className="text-[11px] text-purple-200/80 font-medium mt-0.5 truncate">
               {seniorMode
                 ? 'تصدیق شدہ فیملی فرینڈلی برانڈز اور تشہیر'
                 : 'Verified family-friendly businesses & direct promotions'}
@@ -199,17 +200,35 @@ export const SponsorSection: React.FC<SponsorSectionProps> = ({
           </div>
         </div>
 
-        {isStandalonePage && onBackToHome && (
+        <div className="flex items-center gap-1.5 shrink-0">
           <button
+            type="button"
             onClick={() => {
               soundService.playClick();
-              onBackToHome();
+              if (onOpenAdvertiseModal) {
+                onOpenAdvertiseModal();
+              } else {
+                handleOpenBuyPackage(packages[0]);
+              }
             }}
-            className="w-8 h-8 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center text-white tap-bounce shrink-0"
+            className="px-3 py-1.5 rounded-xl bg-amber-400 hover:bg-amber-300 text-slate-950 font-black text-[11px] tap-bounce shadow-sm whitespace-nowrap"
           >
-            <X className="w-4 h-4" />
+            {seniorMode ? 'تشہیر کریں' : 'Advertise with us'}
           </button>
-        )}
+
+          {isStandalonePage && onBackToHome && (
+            <button
+              type="button"
+              onClick={() => {
+                soundService.playClick();
+                onBackToHome();
+              }}
+              className="w-8 h-8 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center text-white tap-bounce shrink-0"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          )}
+        </div>
       </div>
 
       {/* 2. Active Sponsor Ads Section */}

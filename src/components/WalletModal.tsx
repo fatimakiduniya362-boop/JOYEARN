@@ -29,17 +29,22 @@ import { hapticService } from '../services/haptics';
 import { submitWithdrawalRequestToCloud, loadUserWithdrawals } from '../services/firestoreService';
 import { ADMIN_EMAIL } from './AdminWithdrawalModal';
 
-// ============================================================================
-// 💰 REAL REWARDS & WITHDRAWAL CONFIGURATION (EDITABLE AT TOP OF CODE)
-// ============================================================================
-export const POINTS_PER_DOLLAR = 1000; // 1,000 Points = $1.00 USD
-export const MIN_WITHDRAW_USD = 100; // Editable constant: Minimum $100 USD threshold
-export const MIN_WITHDRAW_POINTS = MIN_WITHDRAW_USD * POINTS_PER_DOLLAR; // Minimum 100,000 Points ($100 USD) required to withdraw
-export const DAILY_MAX_POINTS = 2500; // Anti-cheat: max points earnable per day
-export const REWARDED_VIDEO_COOLDOWN_SECONDS = 120; // 2 minutes cooldown between rewarded video claims
+import {
+  POINTS_PER_DOLLAR,
+  MIN_WITHDRAW_USD,
+  MIN_WITHDRAWAL_POINTS as MIN_WITHDRAW_POINTS,
+  DAILY_MAX_POINTS,
+  MANDATORY_REWARDS_NOTICE,
+} from '../config/paymentConfig';
 
-export const MANDATORY_REWARDS_NOTICE =
-  'Rewards depend on ad revenue, are reviewed manually and are not guaranteed.';
+export {
+  POINTS_PER_DOLLAR,
+  MIN_WITHDRAW_USD,
+  MIN_WITHDRAW_POINTS,
+  DAILY_MAX_POINTS,
+  MANDATORY_REWARDS_NOTICE,
+};
+export const REWARDED_VIDEO_COOLDOWN_SECONDS = 120;
 
 interface WalletModalProps {
   points: number;
@@ -99,6 +104,7 @@ export const WalletModal: React.FC<WalletModalProps> = ({
   const [simulatedAdSeconds, setSimulatedAdSeconds] = useState(5);
   const [cooldownRemaining, setCooldownRemaining] = useState<number>(0);
   const [purchaseSuccessMessage, setPurchaseSuccessMessage] = useState<string | null>(null);
+  const [actionErrorNotice, setActionErrorNotice] = useState<string | null>(null);
 
   // Load user's withdrawal history
   const fetchHistory = async () => {
@@ -224,9 +230,8 @@ export const WalletModal: React.FC<WalletModalProps> = ({
     } catch (err: any) {
       console.error('Withdrawal error:', err);
       setIsSubmittingWithdrawal(false);
-      try {
-        alert(err?.message || 'Unable to process withdrawal right now. Please try again.');
-      } catch {}
+      setValidationError(err?.message || 'Unable to process withdrawal right now. Please try again.');
+      setShowConfirmModal(false);
     }
   };
 
@@ -236,9 +241,8 @@ export const WalletModal: React.FC<WalletModalProps> = ({
     if (points < perk.pointsCost) {
       soundService.playClick();
       hapticService.warning();
-      try {
-        alert(`You need ${perk.pointsCost - points} more JoyPoints to unlock this perk!`);
-      } catch {}
+      setActionErrorNotice(`You need ${(perk.pointsCost - points).toLocaleString()} more JoyPoints to unlock ${perk.name}!`);
+      setTimeout(() => setActionErrorNotice(null), 4000);
       return;
     }
 
@@ -262,17 +266,15 @@ export const WalletModal: React.FC<WalletModalProps> = ({
 
     if (cooldownRemaining > 0) {
       soundService.playClick();
-      try {
-        alert(`Anti-cheat cooldown active: Please wait ${cooldownRemaining}s before watching another sponsored video.`);
-      } catch {}
+      setActionErrorNotice(`Anti-cheat cooldown active: Please wait ${cooldownRemaining}s before watching another sponsored video.`);
+      setTimeout(() => setActionErrorNotice(null), 4000);
       return;
     }
 
     // Check daily max limit
     if (todayPoints >= DAILY_MAX_POINTS) {
-      try {
-        alert(`Daily points limit reached (${DAILY_MAX_POINTS} Pts). Please return tomorrow to continue earning!`);
-      } catch {}
+      setActionErrorNotice(`Daily points limit reached (${DAILY_MAX_POINTS.toLocaleString()} Pts). Please return tomorrow to continue earning!`);
+      setTimeout(() => setActionErrorNotice(null), 4000);
       return;
     }
 
@@ -473,6 +475,21 @@ export const WalletModal: React.FC<WalletModalProps> = ({
             <div className="p-3 bg-emerald-50 border border-emerald-300 rounded-2xl text-xs text-emerald-800 font-bold flex items-center gap-2">
               <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
               <span>{purchaseSuccessMessage}</span>
+            </div>
+          )}
+          {actionErrorNotice && (
+            <div className="p-3 bg-amber-50 dark:bg-amber-950/70 border border-amber-300 dark:border-amber-700 rounded-2xl text-xs text-amber-900 dark:text-amber-200 font-bold flex items-center justify-between gap-2">
+              <span className="flex items-center gap-2">
+                <AlertCircle className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0" />
+                <span>{actionErrorNotice}</span>
+              </span>
+              <button
+                type="button"
+                onClick={() => setActionErrorNotice(null)}
+                className="text-amber-700 dark:text-amber-300 font-black"
+              >
+                ✕
+              </button>
             </div>
           )}
 

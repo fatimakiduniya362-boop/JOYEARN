@@ -27,6 +27,11 @@ import { playlistService } from '../services/playlistService';
 import { PlaylistBar } from './PlaylistBar';
 import { AddToPlaylistModal } from './AddToPlaylistModal';
 import { DEFAULT_FALLBACK_VIDEO_STREAM } from '../data/watchVideosData';
+import {
+  getDataSaverPreferences,
+  getNetworkProfile,
+  resolveVideoPlaybackPolicy,
+} from '../services/dataSaverService';
 
 interface WatchModalProps {
   videos: VideoContent[];
@@ -432,43 +437,58 @@ export const WatchModal: React.FC<WatchModalProps> = ({
           ref={playerBoxRef}
           className="relative bg-slate-950 text-white flex flex-col items-center justify-center min-h-[220px] max-h-[250px] aspect-video w-full overflow-hidden select-none"
         >
-          {/* Direct HTML5 Video Player with Verified Educational Streams */}
-          {!hasError && (
-            <video
-              key={`${selectedVideo.id}-${retryKey}`}
-              src={selectedVideo.mediaUrl || selectedVideo.videoUrl || DEFAULT_FALLBACK_VIDEO_STREAM}
-              poster={selectedVideo.thumbnail}
-              controls
-              playsInline
-              autoPlay
-              className="w-full h-full object-cover absolute inset-0 z-0"
-              onLoadedData={() => setIsLoading(false)}
-              onPlay={() => {
-                setIsPlaying(true);
-                setIsLoading(false);
-              }}
-              onPause={() => setIsPlaying(false)}
-              onError={() => {
-                // Auto-fallback
-                const target = document.querySelector('video');
-                if (target && target.src !== DEFAULT_FALLBACK_VIDEO_STREAM) {
-                  target.src = DEFAULT_FALLBACK_VIDEO_STREAM;
-                  target.load();
-                  target.play().catch(() => {});
-                } else {
-                  setHasError(true);
-                  setIsLoading(false);
-                  warning();
-                }
-              }}
-            >
-              <source
+          {/* Direct HTML5 Video Player with Data Saver preload & mobile-data autoplay protection */}
+          {!hasError && (() => {
+            const modalPolicy = resolveVideoPlaybackPolicy(
+              getDataSaverPreferences(),
+              getNetworkProfile(),
+              'direct_file'
+            );
+            return (
+              <video
+                key={`${selectedVideo.id}-${retryKey}`}
                 src={selectedVideo.mediaUrl || selectedVideo.videoUrl || DEFAULT_FALLBACK_VIDEO_STREAM}
-                type="video/webm"
-              />
-              <source src={DEFAULT_FALLBACK_VIDEO_STREAM} type="video/webm" />
-            </video>
-          )}
+                poster={selectedVideo.thumbnail}
+                controls
+                playsInline
+                preload={modalPolicy.preloadMode}
+                autoPlay={modalPolicy.shouldAutoplay}
+                className="w-full h-full object-cover absolute inset-0 z-0"
+                onLoadedData={() => setIsLoading(false)}
+                onWaiting={() => setIsLoading(true)}
+                onPlaying={() => {
+                  setIsPlaying(true);
+                  setIsLoading(false);
+                }}
+                onPlay={() => {
+                  setIsPlaying(true);
+                  setIsLoading(false);
+                }}
+                onPause={() => setIsPlaying(false)}
+                onError={() => {
+                  // Auto-fallback
+                  const target = document.querySelector('video');
+                  if (target && target.src !== DEFAULT_FALLBACK_VIDEO_STREAM) {
+                    target.src = DEFAULT_FALLBACK_VIDEO_STREAM;
+                    target.load();
+                    if (modalPolicy.shouldAutoplay) {
+                      target.play().catch(() => {});
+                    }
+                  } else {
+                    setHasError(true);
+                    setIsLoading(false);
+                    warning();
+                  }
+                }}
+              >
+                <source
+                  src={selectedVideo.mediaUrl || selectedVideo.videoUrl || DEFAULT_FALLBACK_VIDEO_STREAM}
+                  type="video/webm"
+                />
+                <source src={DEFAULT_FALLBACK_VIDEO_STREAM} type="video/webm" />
+              </video>
+            );
+          })()}
 
           {/* Loading Spinner Overlay */}
           {isLoading && !hasError && (

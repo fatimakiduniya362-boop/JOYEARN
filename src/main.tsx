@@ -8,8 +8,12 @@ import './index.css';
 // Initialize global Crashlytics error listeners
 crashlytics.init();
 
-// Register Service Worker for offline capabilities & PWA compliance
-if ('serviceWorker' in navigator && process.env.NODE_ENV === 'production') {
+// Register Service Worker only if VitePWA auto-registration script isn't present
+if (
+  'serviceWorker' in navigator &&
+  import.meta.env.PROD &&
+  !document.getElementById('vite-plugin-pwa:register-sw')
+) {
   window.addEventListener('load', () => {
     navigator.serviceWorker.register('/sw.js').catch((err) => {
       console.warn('Service worker registration failed:', err);

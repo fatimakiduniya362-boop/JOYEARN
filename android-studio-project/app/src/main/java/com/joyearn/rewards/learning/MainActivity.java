@@ -2,7 +2,6 @@ package com.joyearn.rewards.learning;
 
 import android.net.Uri;
 import android.os.Bundle;
-import androidx.browser.customtabs.CustomTabsIntent;
 import com.google.androidbrowserhelper.trusted.LauncherActivity;
 
 public class MainActivity extends LauncherActivity {
@@ -10,6 +9,9 @@ public class MainActivity extends LauncherActivity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+
+        // Request Google UMP consent and initialize Google Mobile Ads SDK safely once consent permits
+        JoyEarnAdsController.getInstance().gatherConsentAndInitialize(this, null);
     }
 
     @Override

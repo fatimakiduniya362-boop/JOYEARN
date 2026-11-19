@@ -1,6 +1,6 @@
 import React from 'react';
-import { ADMOB_CONFIG, ADS_ENABLED } from '../services/adMobService';
-import { Sparkles, Shield } from 'lucide-react';
+import { ADS_ENABLED } from '../services/adMobService';
+import { Shield } from 'lucide-react';
 
 interface AdMobBannerProps {
   seniorMode?: boolean;

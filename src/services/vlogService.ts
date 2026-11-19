@@ -2,7 +2,7 @@
 // 📹 JOYEARN VLOGS SERVICE (YOUTUBE-EMBEDDED COMMUNITY SHARING & MODERATION)
 // ============================================================================
 
-import { getFirestoreDB, isQuotaOrResourceExhausted, notifyServerBusy } from './firestoreService';
+import { getFirestoreDB, getFirebaseStorage, isQuotaOrResourceExhausted, notifyServerBusy } from './firestoreService';
 import {
   collection,
   doc,
@@ -17,8 +17,10 @@ import {
   limit,
   serverTimestamp,
   increment,
-  writeBatch
+  writeBatch,
+  runTransaction
 } from 'firebase/firestore';
+import { ref as storageRef, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
 
 export type VlogCategory =
   | 'cooking'
@@ -49,8 +51,9 @@ export interface VlogItem {
   id: string;
   uid: string;
   creatorName: string; // Google display name ONLY
-  title: string; // max 80 characters
-  description: string; // max 300 characters
+  creatorPhotoURL?: string;
+  title: string; // max 120 characters
+  description: string; // max 400 characters
   category: VlogCategory;
   videoId?: string; // YouTube ID (Completely Optional)
   thumbnail: string;
@@ -66,6 +69,9 @@ export interface VlogItem {
   isShort?: boolean;
   fileSizeMb?: number;
   flaggedForReview?: boolean;
+  likeCount?: number;
+  commentCount?: number;
+  audioTrack?: string;
 }
 
 // Strict Banned Keywords for all-ages community protection
@@ -116,7 +122,24 @@ const CACHE_TTL_MS = 10 * 60 * 1000; // 10 minutes local cache
 const BLOCKED_CREATORS_KEY = 'joyearn_blocked_creators';
 const USER_SUBMISSIONS_TODAY_KEY = 'joyearn_vlog_submissions_today';
 
-// Fallback curated seed vlogs (Family-friendly YouTube links)
+function createCategoryPosterSvg(bgStart: string, bgEnd: string, label: string): string {
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="640" height="360" viewBox="0 0 640 360"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="${bgStart}"/><stop offset="100%" stop-color="${bgEnd}"/></linearGradient></defs><rect width="640" height="360" fill="url(#g)"/><text x="50%" y="52%" dominant-baseline="middle" text-anchor="middle" fill="#ffffff" fill-opacity="0.92" font-family="system-ui,sans-serif" font-size="26" font-weight="700">${label}</text></svg>`;
+  return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+}
+
+const DEFAULT_CATEGORY_THUMBNAILS: Record<VlogCategory, string> = {
+  cooking: createCategoryPosterSvg('#7c2d12', '#c2410c', 'Cooking & Recipes'),
+  gardening: createCategoryPosterSvg('#064e3b', '#047857', 'Gardening & Plants'),
+  'home and family': createCategoryPosterSvg('#312e81', '#4338ca', 'Home & Family'),
+  health: createCategoryPosterSvg('#0f766e', '#0d9488', 'Health & Wellness'),
+  nature: createCategoryPosterSvg('#14532d', '#15803d', 'Nature & Outdoors'),
+  learning: createCategoryPosterSvg('#1e3a8a', '#2563eb', 'Learning & Skills'),
+  travel: createCategoryPosterSvg('#0c4a6e', '#0284c7', 'Travel & Outdoors'),
+  'funny and wholesome': createCategoryPosterSvg('#831843', '#be185d', 'Funny & Wholesome'),
+  other: createCategoryPosterSvg('#1e293b', '#334155', 'Community Vlog'),
+};
+
+// Fallback curated seed vlogs (Family-friendly verified videos & reels)
 const SEED_APPROVED_VLOGS: VlogItem[] = [
   {
     id: 'vlog_seed_1',
@@ -169,6 +192,312 @@ const SEED_APPROVED_VLOGS: VlogItem[] = [
     status: 'approved',
     reportCount: 0,
     createdAt: '2026-11-04T09:00:00.000Z',
+    duration: '3:15',
+    likeCount: 42,
+    commentCount: 5,
+  },
+  {
+    id: 'reel_seed_1',
+    uid: 'system_curated',
+    creatorName: 'Amina Family Kitchen',
+    title: '60-Second Mango Mint Cooler Recipe for Hot Days',
+    description: 'Blend fresh ripe mango, garden mint leaves, lemon squeeze, and chilled water in under a minute!',
+    category: 'cooking',
+    videoId: '4aZy3u0aTVE',
+    thumbnail: 'https://i.ytimg.com/vi/4aZy3u0aTVE/hqdefault.jpg',
+    status: 'approved',
+    reportCount: 0,
+    createdAt: '2026-11-12T10:00:00.000Z',
+    duration: '0:48',
+    isShort: true,
+    likeCount: 128,
+    commentCount: 14,
+    audioTrack: 'Fresh Kitchen Breeze · Original',
+  },
+  {
+    id: 'reel_seed_2',
+    uid: 'system_curated',
+    creatorName: 'Green Thumb Tariq',
+    title: 'Propagate Mint Stems in Water in Just 30 Seconds',
+    description: 'Snip a healthy stem below a leaf node and place it in a sunny windowsill jar.',
+    category: 'gardening',
+    videoId: '0m3hHZZ76F0',
+    thumbnail: 'https://i.ytimg.com/vi/0m3hHZZ76F0/hqdefault.jpg',
+    status: 'approved',
+    reportCount: 0,
+    createdAt: '2026-11-13T09:30:00.000Z',
+    duration: '0:36',
+    isShort: true,
+    likeCount: 94,
+    commentCount: 9,
+    audioTrack: 'Morning Terrace Birds · Original',
+  },
+  {
+    id: 'reel_seed_3',
+    uid: 'system_curated',
+    creatorName: 'Farhan Learning Hub',
+    title: 'Quick Origami Paper Butterfly Fold for Kids',
+    description: 'Easy step-by-step colorful origami fold to boost focus and hand-eye coordination.',
+    category: 'learning',
+    videoId: 's0bS-SBAgJI',
+    thumbnail: 'https://i.ytimg.com/vi/s0bS-SBAgJI/hqdefault.jpg',
+    status: 'approved',
+    reportCount: 0,
+    createdAt: '2026-11-14T15:20:00.000Z',
+    duration: '0:52',
+    isShort: true,
+    likeCount: 163,
+    commentCount: 19,
+    audioTrack: 'Acoustic Study Chimes · Original',
+  },
+  {
+    id: 'reel_seed_4',
+    uid: 'system_curated',
+    creatorName: 'Ayesha Wellness Corner',
+    title: '2-Minute Seated Neck & Shoulder Stretch Break',
+    description: 'Gentle posture reset you can do between reading or homework sessions.',
+    category: 'health',
+    videoId: '2b9txcAt4e0',
+    thumbnail: 'https://i.ytimg.com/vi/2b9txcAt4e0/hqdefault.jpg',
+    status: 'approved',
+    reportCount: 0,
+    createdAt: '2026-11-15T08:10:00.000Z',
+    duration: '0:44',
+    isShort: true,
+    likeCount: 87,
+    commentCount: 7,
+    audioTrack: 'Calm Breath Rhythm · Original',
+  },
+  {
+    id: 'vlog_seed_5',
+    uid: 'system_curated',
+    creatorName: 'Green Thumb Tariq',
+    title: 'Morning Garden Honeybees & Blooming Sunflowers',
+    description: 'Observe how friendly honeybees gather pollen across sunlit garden blossoms and keep backyard herbs thriving.',
+    category: 'gardening',
+    videoType: 'upload',
+    videoUrl: 'https://upload.wikimedia.org/wikipedia/commons/2/26/Bees_on_flowers.webm',
+    thumbnail: DEFAULT_CATEGORY_THUMBNAILS.gardening,
+    status: 'approved',
+    reportCount: 0,
+    createdAt: '2026-11-15T10:00:00.000Z',
+    duration: '1:45',
+    likeCount: 76,
+    commentCount: 8,
+  },
+  {
+    id: 'vlog_seed_6',
+    uid: 'system_curated',
+    creatorName: 'Farhan Learning Hub',
+    title: 'Winter Crystal Science: Watch Soap Bubbles Freeze',
+    description: 'Real-time close-up of delicate ice crystals forming delicate feather patterns across a frozen soap film.',
+    category: 'learning',
+    videoType: 'upload',
+    videoUrl: 'https://upload.wikimedia.org/wikipedia/commons/8/88/A_freezing_soap_bubble_in_McGregor%2C_Minnesota.webm',
+    thumbnail: DEFAULT_CATEGORY_THUMBNAILS.learning,
+    status: 'approved',
+    reportCount: 0,
+    createdAt: '2026-11-15T11:30:00.000Z',
+    duration: '2:18',
+    likeCount: 112,
+    commentCount: 11,
+  },
+  {
+    id: 'vlog_seed_7',
+    uid: 'system_curated',
+    creatorName: 'Safa Travel Diaries',
+    title: 'Historic Village Square & Water Fountain Walk',
+    description: 'A calm sightseeing stroll past timeless stone bridges, canal pathways, and traditional village fountains.',
+    category: 'travel',
+    videoType: 'upload',
+    videoUrl: 'https://upload.wikimedia.org/wikipedia/commons/8/83/11Fountains_-_Sloten.webm',
+    thumbnail: DEFAULT_CATEGORY_THUMBNAILS.travel,
+    status: 'approved',
+    reportCount: 0,
+    createdAt: '2026-11-15T12:15:00.000Z',
+    duration: '2:50',
+    likeCount: 68,
+    commentCount: 6,
+  },
+  {
+    id: 'vlog_seed_8',
+    uid: 'system_curated',
+    creatorName: 'Nature Walk Pakistan',
+    title: 'Graceful Black Swans Gliding Across Calm Waters',
+    description: 'Peaceful wetland wildlife study observing black swans swimming and foraging naturally at dusk.',
+    category: 'nature',
+    videoType: 'upload',
+    videoUrl: 'https://upload.wikimedia.org/wikipedia/commons/c/c9/Black_swan_%28Cygnus_atratus%29.webm',
+    thumbnail: DEFAULT_CATEGORY_THUMBNAILS.nature,
+    status: 'approved',
+    reportCount: 0,
+    createdAt: '2026-11-15T13:40:00.000Z',
+    duration: '2:05',
+    likeCount: 91,
+    commentCount: 9,
+  },
+  {
+    id: 'vlog_seed_9',
+    uid: 'system_curated',
+    creatorName: 'Zainab Home & Family',
+    title: 'Family Documentary Hour: Savannah Lions & Cubs',
+    description: 'Wholesome family wildlife viewing showing peaceful pride bonds and social resting behavior in nature.',
+    category: 'home and family',
+    videoType: 'upload',
+    videoUrl: 'https://upload.wikimedia.org/wikipedia/commons/d/d5/Affectionate_lions.webm',
+    thumbnail: DEFAULT_CATEGORY_THUMBNAILS['home and family'],
+    status: 'approved',
+    reportCount: 0,
+    createdAt: '2026-11-15T15:00:00.000Z',
+    duration: '2:40',
+    likeCount: 105,
+    commentCount: 12,
+  },
+  {
+    id: 'vlog_seed_10',
+    uid: 'system_curated',
+    creatorName: 'Kids Story Corner',
+    title: 'Big Buck Bunny: Forest Friends Animated Adventure',
+    description: 'A cheerful open-source family animation celebrating kindness, courage, and woodland teamwork.',
+    category: 'funny and wholesome',
+    videoType: 'upload',
+    videoUrl: 'https://upload.wikimedia.org/wikipedia/commons/transcoded/c/c0/Big_Buck_Bunny_4K.webm/Big_Buck_Bunny_4K.webm.480p.vp9.webm',
+    thumbnail: DEFAULT_CATEGORY_THUMBNAILS['funny and wholesome'],
+    status: 'approved',
+    reportCount: 0,
+    createdAt: '2026-11-15T16:20:00.000Z',
+    duration: '4:30',
+    likeCount: 184,
+    commentCount: 21,
+  },
+  {
+    id: 'vlog_seed_11',
+    uid: 'system_curated',
+    creatorName: 'Ayesha Wellness Corner',
+    title: 'Mindful Breathing & Scenic Mountain Stream Break',
+    description: 'Take three calm minutes outdoors watching clear flowing mountain streams and evergreen scenery.',
+    category: 'health',
+    videoType: 'upload',
+    videoUrl: 'https://upload.wikimedia.org/wikipedia/commons/4/46/4K_Nature_Cinematography_recorded_with_Nikon_D5300.webm',
+    thumbnail: DEFAULT_CATEGORY_THUMBNAILS.health,
+    status: 'approved',
+    reportCount: 0,
+    createdAt: '2026-11-15T17:10:00.000Z',
+    duration: '3:12',
+    likeCount: 79,
+    commentCount: 7,
+  },
+  {
+    id: 'vlog_seed_12',
+    uid: 'system_curated',
+    creatorName: 'Amina Family Kitchen',
+    title: 'Weekend Countryside Market & Meadow Farm Tour',
+    description: 'Exploring fresh pasture herbs and visiting friendly farm alpacas before preparing dinner.',
+    category: 'cooking',
+    videoType: 'upload',
+    videoUrl: 'https://upload.wikimedia.org/wikipedia/commons/6/66/Alpaca_%28Vicugna_pacos%29.webm',
+    thumbnail: DEFAULT_CATEGORY_THUMBNAILS.cooking,
+    status: 'approved',
+    reportCount: 0,
+    createdAt: '2026-11-15T18:30:00.000Z',
+    duration: '1:55',
+    likeCount: 64,
+    commentCount: 5,
+  },
+  {
+    id: 'reel_seed_5',
+    uid: 'system_curated',
+    creatorName: 'Eco Wonders Studio',
+    title: 'Macro Close-Up: Blue-Tailed Damselfly by the Reed',
+    description: 'Watch how emerald wetlands shelter iridescent damselflies on sunny afternoons.',
+    category: 'nature',
+    videoType: 'upload',
+    videoUrl: 'https://upload.wikimedia.org/wikipedia/commons/2/28/Blue-tailed_Damselfly_%28Ischnura_elegans%29.webm',
+    thumbnail: DEFAULT_CATEGORY_THUMBNAILS.nature,
+    status: 'approved',
+    reportCount: 0,
+    createdAt: '2026-11-16T06:45:00.000Z',
+    duration: '0:28',
+    isShort: true,
+    likeCount: 118,
+    commentCount: 10,
+    audioTrack: 'Wetland Breeze · Original',
+  },
+  {
+    id: 'reel_seed_6',
+    uid: 'system_curated',
+    creatorName: 'Science Sparks',
+    title: '25-Second Frost Crystal Pattern Magic',
+    description: 'Watch freezing temperatures crystallize a single soap bubble before your eyes!',
+    category: 'learning',
+    videoType: 'upload',
+    videoUrl: 'https://upload.wikimedia.org/wikipedia/commons/8/88/A_freezing_soap_bubble_in_McGregor%2C_Minnesota.webm',
+    thumbnail: DEFAULT_CATEGORY_THUMBNAILS.learning,
+    status: 'approved',
+    reportCount: 0,
+    createdAt: '2026-11-16T07:15:00.000Z',
+    duration: '0:24',
+    isShort: true,
+    likeCount: 152,
+    commentCount: 16,
+    audioTrack: 'Winter Chime · Original',
+  },
+  {
+    id: 'reel_seed_7',
+    uid: 'system_curated',
+    creatorName: 'Safa Travel Diaries',
+    title: 'Peaceful Canal Reflections & Moorhen Sighting',
+    description: 'Quick 30-second walk beside quiet waterways and gentle waterbirds.',
+    category: 'travel',
+    videoType: 'upload',
+    videoUrl: 'https://upload.wikimedia.org/wikipedia/commons/7/70/Common_Moorhen_%28Gallinula_chloropus%29_by_a_canal.webm',
+    thumbnail: DEFAULT_CATEGORY_THUMBNAILS.travel,
+    status: 'approved',
+    reportCount: 0,
+    createdAt: '2026-11-16T08:00:00.000Z',
+    duration: '0:32',
+    isShort: true,
+    likeCount: 73,
+    commentCount: 4,
+    audioTrack: 'Canal Morning · Original',
+  },
+  {
+    id: 'reel_seed_8',
+    uid: 'system_curated',
+    creatorName: 'Sunny Meadow Friends',
+    title: 'Friendly Meadow Alpaca Saying Hello!',
+    description: 'Instant smile break with fluffy pasture alpacas enjoying green grass.',
+    category: 'funny and wholesome',
+    videoType: 'upload',
+    videoUrl: 'https://upload.wikimedia.org/wikipedia/commons/6/66/Alpaca_%28Vicugna_pacos%29.webm',
+    thumbnail: DEFAULT_CATEGORY_THUMBNAILS['funny and wholesome'],
+    status: 'approved',
+    reportCount: 0,
+    createdAt: '2026-11-16T08:40:00.000Z',
+    duration: '0:26',
+    isShort: true,
+    likeCount: 204,
+    commentCount: 23,
+    audioTrack: 'Happy Farm Banjo · Original',
+  },
+  {
+    id: 'reel_seed_9',
+    uid: 'system_curated',
+    creatorName: 'Green Thumb Tariq',
+    title: 'Busy Pollinators Helping Garden Herbs Thrive',
+    description: 'Why planting marigolds and mint side by side attracts helpful garden bees.',
+    category: 'gardening',
+    videoType: 'upload',
+    videoUrl: 'https://upload.wikimedia.org/wikipedia/commons/2/26/Bees_on_flowers.webm',
+    thumbnail: DEFAULT_CATEGORY_THUMBNAILS.gardening,
+    status: 'approved',
+    reportCount: 0,
+    createdAt: '2026-11-16T09:10:00.000Z',
+    duration: '0:30',
+    isShort: true,
+    likeCount: 139,
+    commentCount: 11,
+    audioTrack: 'Garden Sunbeam · Original',
   },
 ];
 
@@ -257,7 +586,11 @@ function getLocalMirrorVlogs(): VlogItem[] {
     const raw = localStorage.getItem(LOCAL_MIRROR_VLOGS_KEY);
     if (raw) {
       const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        const existingIds = new Set(parsed.map((item: VlogItem) => item.id));
+        const missingSeeds = SEED_APPROVED_VLOGS.filter((s) => !existingIds.has(s.id));
+        return missingSeeds.length > 0 ? [...parsed, ...missingSeeds] : parsed;
+      }
     }
   } catch {}
   return SEED_APPROVED_VLOGS;
@@ -269,18 +602,6 @@ function saveLocalMirrorVlogs(vlogs: VlogItem[]): void {
     localStorage.setItem(LOCAL_MIRROR_VLOGS_KEY, JSON.stringify(vlogs));
   } catch {}
 }
-
-const DEFAULT_CATEGORY_THUMBNAILS: Record<VlogCategory, string> = {
-  cooking: 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?w=600&auto=format&fit=crop&q=80',
-  gardening: 'https://images.unsplash.com/photo-1585320806297-9794b3e4eeae?w=600&auto=format&fit=crop&q=80',
-  'home and family': 'https://images.unsplash.com/photo-1511895426328-dc8714191300?w=600&auto=format&fit=crop&q=80',
-  health: 'https://images.unsplash.com/photo-1506126613408-eca07ce68773?w=600&auto=format&fit=crop&q=80',
-  nature: 'https://images.unsplash.com/photo-1448375240586-882707db888b?w=600&auto=format&fit=crop&q=80',
-  learning: 'https://images.unsplash.com/photo-1503676260728-1c00da094a0b?w=600&auto=format&fit=crop&q=80',
-  travel: 'https://images.unsplash.com/photo-1488646953014-85cb44e25828?w=600&auto=format&fit=crop&q=80',
-  'funny and wholesome': 'https://images.unsplash.com/photo-1517486808906-6ca8b3f04846?w=600&auto=format&fit=crop&q=80',
-  other: 'https://images.unsplash.com/photo-1516321318423-f06f85e504b3?w=600&auto=format&fit=crop&q=80',
-};
 
 /**
  * Resolves an active playable URL for a native or direct vlog
@@ -297,17 +618,65 @@ export async function getPlayableVlogUrl(vlog: VlogItem): Promise<string> {
 }
 
 /**
+ * Uploads a recorded or gallery-selected video Blob/File to Firebase Cloud Storage
+ * and returns its public HTTPS download URL. Reports real upload progress (0..100).
+ */
+export async function uploadVideoToCloudStorage(
+  videoBlob: Blob,
+  uid: string,
+  vlogId: string,
+  onProgress?: (percent: number) => void
+): Promise<string> {
+  const storage = getFirebaseStorage();
+  if (!storage) {
+    throw new Error('Cloud Storage is not initialized. Please check Firebase configuration.');
+  }
+
+  const mime = (videoBlob.type || 'video/mp4').toLowerCase();
+  const ext = mime.includes('webm') ? 'webm' : mime.includes('quicktime') || mime.includes('mov') ? 'mov' : 'mp4';
+  const fileRef = storageRef(storage, `public_vlogs/${uid}/${vlogId}.${ext}`);
+
+  return new Promise<string>((resolve, reject) => {
+    const uploadTask = uploadBytesResumable(fileRef, videoBlob, {
+      contentType: videoBlob.type || 'video/mp4',
+      cacheControl: 'public, max-age=31536000',
+    });
+
+    uploadTask.on(
+      'state_changed',
+      (snapshot) => {
+        if (snapshot.totalBytes > 0 && onProgress) {
+          const pct = Math.round((snapshot.bytesTransferred / snapshot.totalBytes) * 100);
+          onProgress(pct);
+        }
+      },
+      (error) => {
+        reject(error);
+      },
+      async () => {
+        try {
+          const url = await getDownloadURL(uploadTask.snapshot.ref);
+          if (onProgress) onProgress(100);
+          resolve(url);
+        } catch (err) {
+          reject(err);
+        }
+      }
+    );
+  });
+}
+
+/**
  * SUBMIT VLOG:
- * Enforces:
- * - YouTube link completely optional
- * - Native video upload & in-app camera recording
- * - Strict Community Safety Guidelines (no vulgarity/adult content)
- * - Max 2 submissions per day & max 5 pending vlogs at once
- * - Default status 'pending' for safety moderation before public visibility
+ * - For recorded camera vlogs and gallery video uploads: uploads real video to Firebase Cloud Storage,
+ *   then writes the real download URL, uploader info, caption, and timestamp to Firestore `/vlogs/{vlogId}`.
+ * - Never marks a video as published until BOTH Cloud Storage upload and Firestore write succeed.
+ * - Enforces community safety guidelines and daily submission limits.
  */
 export async function submitVlog(data: {
   uid: string;
   creatorName: string;
+  creatorPhotoURL?: string;
   title: string;
   description: string;
   category: VlogCategory;
@@ -320,26 +689,25 @@ export async function submitVlog(data: {
   duration?: string;
   isShort?: boolean;
   fileSizeMb?: number;
+  onUploadProgress?: (percent: number) => void;
 }): Promise<{ success: boolean; vlog?: VlogItem; error?: string }> {
-  // 1. Check daily limit (max 2)
-  if (getSubmissionsCountToday() >= 2) {
+  // 0. Require authenticated account for real cloud publishing
+  if (!data.uid || data.uid === 'guest') {
     return {
       success: false,
-      error: 'Daily limit reached: You can submit at most 2 vlogs per day. Please return tomorrow!',
+      error: 'Please sign in with your Google account before publishing a video.',
     };
   }
 
-  // 2. Check pending limit (max 5 at once)
-  const userExisting = await getUserVlogs(data.uid);
-  const pendingCount = userExisting.filter((v) => v.status === 'pending').length;
-  if (pendingCount >= 5) {
+  // 1. Check daily limit (max 5 per day for active creators)
+  if (getSubmissionsCountToday() >= 5) {
     return {
       success: false,
-      error: 'Pending limit reached: You currently have 5 vlogs awaiting safety review. Please wait for them to be reviewed.',
+      error: 'Daily limit reached: You can publish up to 5 videos per day. Please return tomorrow!',
     };
   }
 
-  // 3. Strict Community Safety Guidelines Check
+  // 2. Strict Community Safety Guidelines Check
   const safety = checkVlogContentSafety(data.title, data.description);
   if (!safety.isSafe) {
     return {
@@ -348,32 +716,64 @@ export async function submitVlog(data: {
     };
   }
 
-  // 4. Video Source Check: YouTube link is optional, but user must provide either native video or YouTube link
+  // 3. Video Source Check
   const cleanVideoId = data.videoId ? data.videoId.trim() : '';
   const hasYouTube = cleanVideoId.length === 11;
-  const hasNativeVideo = Boolean(data.videoBlob || data.nativeMediaId);
+  const hasNativeVideo = Boolean(data.videoBlob || data.nativeMediaId || (data.videoUrl && data.videoUrl.startsWith('https://')));
 
   if (!hasYouTube && !hasNativeVideo) {
     return {
       success: false,
-      error: 'Please select a video from your gallery, record with your camera, or enter an optional YouTube link.',
+      error: 'Please record a video with Vlogs camera, select one from Gallery, or enter a valid YouTube link.',
     };
   }
 
-  const cleanTitle = data.title.trim().slice(0, 80);
-  const cleanDesc = data.description.trim().slice(0, 300);
-  const cleanCreator = data.creatorName.trim().slice(0, 80) || 'Community Learner';
+  const cleanTitle = data.title.trim().slice(0, 120) || 'Community Vlog';
+  const cleanDesc = (data.description || '').trim().slice(0, 400);
+  const cleanCreator = data.creatorName.trim().slice(0, 80) || 'VibeLoom Creator';
   const vlogId = `vlog_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
-  const mediaId = data.nativeMediaId || (hasNativeVideo ? `native_${vlogId}` : undefined);
+  const mediaId = data.nativeMediaId || (data.videoBlob ? `native_${vlogId}` : undefined);
 
-  // If videoBlob passed, save into persistent IndexedDB storage
-  let localBlobUrl: string | undefined = undefined;
-  if (data.videoBlob && mediaId) {
+  // 4. Upload native/recorded video to Firebase Cloud Storage (REAL cloud upload)
+  let cloudVideoUrl: string | undefined =
+    data.videoUrl && data.videoUrl.startsWith('https://') ? data.videoUrl : undefined;
+
+  if (data.videoBlob) {
+    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+      return {
+        success: false,
+        error: 'You are currently offline. Please connect to the internet to upload and publish your video.',
+      };
+    }
+
     try {
-      await saveVideoBlob(mediaId, data.videoBlob, data.videoBlob.type);
-      localBlobUrl = URL.createObjectURL(data.videoBlob);
-    } catch (e) {
-      console.warn('Could not persist video blob to IndexedDB:', e);
+      cloudVideoUrl = await uploadVideoToCloudStorage(
+        data.videoBlob,
+        data.uid,
+        vlogId,
+        data.onUploadProgress
+      );
+    } catch (uploadErr: any) {
+      const code = uploadErr?.code || '';
+      if (code === 'storage/unauthorized') {
+        return {
+          success: false,
+          error: 'Cloud Storage upload was denied by Firebase Storage rules. Please enable authenticated write access to public_vlogs/ in Firebase Console Storage Rules.',
+        };
+      }
+      return {
+        success: false,
+        error: `Video upload failed: ${uploadErr?.message || 'Could not upload to cloud storage.'}`,
+      };
+    }
+
+    // Also cache locally in IndexedDB for instant offline replay by the uploader
+    if (mediaId) {
+      try {
+        await saveVideoBlob(mediaId, data.videoBlob, data.videoBlob.type);
+      } catch {
+        // Non-blocking local cache
+      }
     }
   }
 
@@ -388,57 +788,173 @@ export async function submitVlog(data: {
   }
 
   const videoType = data.videoType || (hasYouTube ? 'youtube' : 'upload');
+  // Cloud-uploaded videos that passed safety moderation publish immediately to the shared community feed;
+  // external YouTube links remain pending admin review.
+  const initialStatus: 'approved' | 'pending' = cloudVideoUrl ? 'approved' : 'pending';
 
   const newVlog: VlogItem = {
     id: vlogId,
     uid: data.uid,
     creatorName: cleanCreator,
+    creatorPhotoURL: data.creatorPhotoURL || '',
     title: cleanTitle,
     description: cleanDesc,
     category: data.category,
     videoId: hasYouTube ? cleanVideoId : undefined,
     videoType,
     nativeMediaId: mediaId,
-    videoUrl: localBlobUrl || data.videoUrl,
+    videoUrl: cloudVideoUrl,
     thumbnail,
     duration: data.duration,
-    isShort: data.isShort,
+    isShort: data.isShort ?? true,
     fileSizeMb: data.fileSizeMb,
-    status: 'pending',
+    status: initialStatus,
     reportCount: 0,
+    likeCount: 0,
     createdAt: new Date().toISOString(),
   };
 
+  // 5. Persist metadata to Firestore (MUST succeed before reporting published)
   const db = getFirestoreDB();
-  if (db) {
-    try {
-      const docRef = doc(db, 'vlogs', vlogId);
-      // Strip in-memory blob URLs before Firestore save
-      const { videoUrl, ...firestoreData } = newVlog;
-      await setDoc(docRef, {
-        ...firestoreData,
-        createdAtServer: serverTimestamp(),
-      });
-    } catch (err: any) {
-      if (isQuotaOrResourceExhausted(err)) notifyServerBusy();
-      console.warn('Firestore vlog submission notice (saving locally):', err);
-    }
+  if (!db) {
+    return {
+      success: false,
+      error: 'Database is not available. Please check your connection and try again.',
+    };
   }
 
-  // Save to local mirror so user sees it in "My Vlogs" immediately with status "Pending review"
+  try {
+    const docRef = doc(db, 'vlogs', vlogId);
+    // Clean undefined keys before Firestore write
+    const firestorePayload: Record<string, any> = {
+      id: newVlog.id,
+      uid: newVlog.uid,
+      creatorName: newVlog.creatorName,
+      creatorPhotoURL: newVlog.creatorPhotoURL || '',
+      title: newVlog.title,
+      description: newVlog.description,
+      category: newVlog.category,
+      videoType: newVlog.videoType,
+      thumbnail: newVlog.thumbnail,
+      status: newVlog.status,
+      reportCount: 0,
+      likeCount: 0,
+      isShort: Boolean(newVlog.isShort),
+      createdAt: newVlog.createdAt,
+      createdAtServer: serverTimestamp(),
+    };
+    if (cloudVideoUrl) firestorePayload.videoUrl = cloudVideoUrl;
+    if (hasYouTube) firestorePayload.videoId = cleanVideoId;
+    if (newVlog.duration) firestorePayload.duration = newVlog.duration;
+    if (typeof newVlog.fileSizeMb === 'number') firestorePayload.fileSizeMb = newVlog.fileSizeMb;
+
+    await setDoc(docRef, firestorePayload);
+  } catch (err: any) {
+    if (isQuotaOrResourceExhausted(err)) notifyServerBusy();
+    return {
+      success: false,
+      error: `Could not save video to community feed: ${err?.message || 'Firestore write failed.'}`,
+    };
+  }
+
+  // Update local mirror & clear feed cache only AFTER real cloud publish succeeded
   const mirror = getLocalMirrorVlogs();
   mirror.unshift(newVlog);
   saveLocalMirrorVlogs(mirror);
 
   incrementSubmissionsCountToday();
 
-  // Clear feed cache
   if (typeof window !== 'undefined') {
     localStorage.removeItem(FEED_CACHE_KEY);
     localStorage.removeItem(FEED_CACHE_TIME_KEY);
   }
 
   return { success: true, vlog: newVlog };
+}
+
+/**
+ * REAL SYNCHRONIZED LIKE / UNLIKE:
+ * Uses a Firestore transaction on `/vlogs/{vlogId}/likes/{uid}` and `/vlogs/{vlogId}`.
+ * Prevents duplicate likes per account and synchronizes real counts across devices.
+ */
+export async function toggleVlogLike(
+  vlogId: string,
+  uid: string
+): Promise<{ liked: boolean; likeCount: number; error?: string }> {
+  if (!uid || uid === 'guest') {
+    return { liked: false, likeCount: 0, error: 'Please sign in to like videos.' };
+  }
+  const db = getFirestoreDB();
+  if (!db) {
+    return { liked: false, likeCount: 0, error: 'Database unavailable.' };
+  }
+
+  const vlogRef = doc(db, 'vlogs', vlogId);
+  const likeRef = doc(db, 'vlogs', vlogId, 'likes', uid);
+
+  try {
+    const result = await runTransaction(db, async (tx) => {
+      const [vlogSnap, likeSnap] = await Promise.all([tx.get(vlogRef), tx.get(likeRef)]);
+      if (!vlogSnap.exists()) {
+        throw new Error('This video is no longer available in the community feed.');
+      }
+      const currentLikes = typeof vlogSnap.data()?.likeCount === 'number' ? vlogSnap.data().likeCount : 0;
+
+      if (likeSnap.exists()) {
+        const nextCount = Math.max(0, currentLikes - 1);
+        tx.delete(likeRef);
+        tx.update(vlogRef, { likeCount: nextCount });
+        return { liked: false, likeCount: nextCount };
+      } else {
+        const nextCount = currentLikes + 1;
+        tx.set(likeRef, {
+          uid,
+          createdAt: new Date().toISOString(),
+        });
+        tx.update(vlogRef, { likeCount: nextCount });
+        return { liked: true, likeCount: nextCount };
+      }
+    });
+
+    // Clear feed cache so next refresh shows updated count
+    if (typeof window !== 'undefined') {
+      localStorage.removeItem(FEED_CACHE_KEY);
+      localStorage.removeItem(FEED_CACHE_TIME_KEY);
+    }
+
+    return result;
+  } catch (err: any) {
+    if (isQuotaOrResourceExhausted(err)) notifyServerBusy();
+    return {
+      liked: false,
+      likeCount: 0,
+      error: err?.message || 'Could not update like right now.',
+    };
+  }
+}
+
+/**
+ * Fetches which of the given vlogIds the signed-in user has liked in Firestore.
+ */
+export async function getUserLikedVlogIds(uid: string, vlogIds: string[]): Promise<Set<string>> {
+  const likedSet = new Set<string>();
+  if (!uid || uid === 'guest' || vlogIds.length === 0) return likedSet;
+  const db = getFirestoreDB();
+  if (!db) return likedSet;
+
+  await Promise.all(
+    vlogIds.slice(0, 50).map(async (vlogId) => {
+      try {
+        const snap = await getDoc(doc(db, 'vlogs', vlogId, 'likes', uid));
+        if (snap.exists()) {
+          likedSet.add(vlogId);
+        }
+      } catch {
+        // Ignore individual offline/seed read misses
+      }
+    })
+  );
+  return likedSet;
 }
 
 /**
@@ -456,7 +972,14 @@ export async function getApprovedVlogs(forceRefresh = false): Promise<VlogItem[]
         const cached = localStorage.getItem(FEED_CACHE_KEY);
         if (cached) {
           const list: VlogItem[] = JSON.parse(cached);
-          if (Array.isArray(list)) return list;
+          if (Array.isArray(list)) {
+            const cachedIds = new Set(list.map((v) => v.id));
+            const blockedList = getBlockedCreators();
+            const missingSeeds = SEED_APPROVED_VLOGS.filter(
+              (s) => !cachedIds.has(s.id) && !blockedList.includes(s.uid)
+            );
+            return missingSeeds.length > 0 ? [...list, ...missingSeeds] : list;
+          }
         }
       }
     } catch {}
@@ -468,32 +991,50 @@ export async function getApprovedVlogs(forceRefresh = false): Promise<VlogItem[]
   const db = getFirestoreDB();
   if (db) {
     try {
-      const q = query(
-        collection(db, 'vlogs'),
-        where('status', '==', 'approved'),
-        orderBy('createdAt', 'desc'),
-        limit(50)
-      );
-      const snap = await getDocs(q);
+      let snap;
+      try {
+        const q = query(
+          collection(db, 'vlogs'),
+          where('status', '==', 'approved'),
+          orderBy('createdAt', 'desc'),
+          limit(50)
+        );
+        snap = await getDocs(q);
+      } catch (indexErr: any) {
+        // Fallback when composite index (status + createdAt) is not yet created
+        const qFallback = query(
+          collection(db, 'vlogs'),
+          where('status', '==', 'approved'),
+          limit(50)
+        );
+        snap = await getDocs(qFallback);
+      }
       snap.forEach((d) => {
         const item = d.data() as VlogItem;
-        if (item && item.reportCount < 3 && !blocked.includes(item.uid)) {
-          vlogs.push({ ...item, id: d.id });
+        if (item && (item.reportCount || 0) < 3 && !blocked.includes(item.uid)) {
+          vlogs.push({ ...item, id: d.id, likeCount: item.likeCount || 0 });
         }
       });
+      vlogs.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
     } catch (err: any) {
       if (isQuotaOrResourceExhausted(err)) notifyServerBusy();
       console.warn('Firestore approved vlogs query notice:', err);
     }
   }
 
-  // If Firestore returned fewer than seed, merge local mirror
+  // Ensure curated seed reels & vlogs are always available alongside user uploads
+  const existingIds = new Set(vlogs.map((v) => v.id));
   if (vlogs.length === 0) {
     const mirror = getLocalMirrorVlogs();
     vlogs = mirror.filter((v) => v.status === 'approved' && v.reportCount < 3 && !blocked.includes(v.uid));
+  } else {
+    const localApprovedReels = getLocalMirrorVlogs().filter(
+      (v) => v.status === 'approved' && v.reportCount < 3 && !blocked.includes(v.uid) && !existingIds.has(v.id)
+    );
+    vlogs = [...vlogs, ...localApprovedReels];
   }
 
-  // Cache locally for 10 minutes
+  // Also ensure any new local approved reels are present when reading cache
   if (typeof window !== 'undefined' && vlogs.length > 0) {
     try {
       localStorage.setItem(FEED_CACHE_KEY, JSON.stringify(vlogs));
@@ -598,7 +1139,7 @@ export async function reportVlog(
 }
 
 // ============================================================================
-// ADMIN WORKFLOW METHODS (fatimakiduniya362@gmail.com)
+// ADMIN WORKFLOW METHODS (romeelajutt23@gmail.com)
 // ============================================================================
 
 export async function getAdminPendingVlogs(): Promise<VlogItem[]> {
@@ -742,7 +1283,7 @@ export async function blockCreatorGlobally(creatorUid: string): Promise<boolean>
     try {
       await setDoc(doc(db, 'blocked_creators', creatorUid), {
         blockedAt: new Date().toISOString(),
-        blockedBy: 'fatimakiduniya362@gmail.com',
+        blockedBy: 'romeelajutt23@gmail.com',
       });
     } catch (err: any) {
       if (isQuotaOrResourceExhausted(err)) notifyServerBusy();
@@ -750,3 +1291,222 @@ export async function blockCreatorGlobally(creatorUid: string): Promise<boolean>
   }
   return true;
 }
+
+// ============================================================================
+// REELS ENGAGEMENT, SAFETY-FILTERED COMMENTS & WATCH REWARDS
+// ============================================================================
+
+export interface ReelComment {
+  id: string;
+  vlogId: string;
+  uid: string;
+  authorName: string;
+  text: string;
+  createdAt: string;
+}
+
+const LIKED_REELS_PREFIX = 'joyearn_liked_reels_';
+const SAVED_REELS_PREFIX = 'joyearn_saved_reels_';
+const REEL_LIKE_COUNTS_KEY = 'joyearn_reel_like_counts';
+const REEL_COMMENTS_KEY = 'joyearn_reel_comments_map';
+const REEL_REWARDS_PREFIX = 'joyearn_reel_watch_rewards_';
+export const MAX_DAILY_REEL_WATCH_REWARDS = 5;
+export const REEL_WATCH_BONUS_POINTS = 5;
+
+const SEED_REEL_COMMENTS: Record<string, ReelComment[]> = {
+  reel_seed_1: [
+    {
+      id: 'rc_seed_1',
+      vlogId: 'reel_seed_1',
+      uid: 'seed_user_1',
+      authorName: 'Sana Tariq',
+      text: 'Tried this with fresh pudina leaves from our pot — super refreshing!',
+      createdAt: '2026-11-12T12:10:00.000Z',
+    },
+  ],
+  reel_seed_3: [
+    {
+      id: 'rc_seed_2',
+      vlogId: 'reel_seed_3',
+      uid: 'seed_user_2',
+      authorName: 'Bilal Ahmad',
+      text: 'My younger sister folded three colorful butterflies after watching this reel.',
+      createdAt: '2026-11-14T16:40:00.000Z',
+    },
+  ],
+};
+
+export function getLikedReelIds(uid?: string | null): string[] {
+  if (typeof window === 'undefined') return [];
+  try {
+    const raw = localStorage.getItem(`${LIKED_REELS_PREFIX}${uid || 'guest'}`);
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+}
+
+export function getReelLikeCountsMap(): Record<string, number> {
+  if (typeof window === 'undefined') return {};
+  try {
+    const raw = localStorage.getItem(REEL_LIKE_COUNTS_KEY);
+    return raw ? JSON.parse(raw) : {};
+  } catch {
+    return {};
+  }
+}
+
+export function getEffectiveReelLikeCount(vlog: VlogItem): number {
+  const counts = getReelLikeCountsMap();
+  if (typeof counts[vlog.id] === 'number') {
+    return counts[vlog.id];
+  }
+  return vlog.likeCount || 0;
+}
+
+export function toggleReelLike(
+  vlog: VlogItem,
+  uid?: string | null
+): { liked: boolean; count: number } {
+  const safeUid = uid || 'guest';
+  const likedIds = getLikedReelIds(safeUid);
+  const currentlyLiked = likedIds.includes(vlog.id);
+  const currentCount = getEffectiveReelLikeCount(vlog);
+
+  const nextLiked = !currentlyLiked;
+  const nextIds = nextLiked
+    ? Array.from(new Set([...likedIds, vlog.id]))
+    : likedIds.filter((id) => id !== vlog.id);
+  const nextCount = Math.max(0, currentCount + (nextLiked ? 1 : -1));
+
+  if (typeof window !== 'undefined') {
+    try {
+      localStorage.setItem(`${LIKED_REELS_PREFIX}${safeUid}`, JSON.stringify(nextIds));
+      const counts = getReelLikeCountsMap();
+      counts[vlog.id] = nextCount;
+      localStorage.setItem(REEL_LIKE_COUNTS_KEY, JSON.stringify(counts));
+    } catch {}
+  }
+
+  return { liked: nextLiked, count: nextCount };
+}
+
+export function getSavedReelIds(uid?: string | null): string[] {
+  if (typeof window === 'undefined') return [];
+  try {
+    const raw = localStorage.getItem(`${SAVED_REELS_PREFIX}${uid || 'guest'}`);
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+}
+
+export function toggleReelSave(vlogId: string, uid?: string | null): boolean {
+  const safeUid = uid || 'guest';
+  const saved = getSavedReelIds(safeUid);
+  const isSaved = saved.includes(vlogId);
+  const nextSaved = !isSaved;
+  const nextIds = nextSaved
+    ? Array.from(new Set([...saved, vlogId]))
+    : saved.filter((id) => id !== vlogId);
+
+  if (typeof window !== 'undefined') {
+    try {
+      localStorage.setItem(`${SAVED_REELS_PREFIX}${safeUid}`, JSON.stringify(nextIds));
+    } catch {}
+  }
+  return nextSaved;
+}
+
+export function getReelComments(vlogId: string): ReelComment[] {
+  if (typeof window === 'undefined') return SEED_REEL_COMMENTS[vlogId] || [];
+  try {
+    const raw = localStorage.getItem(REEL_COMMENTS_KEY);
+    const map: Record<string, ReelComment[]> = raw ? JSON.parse(raw) : {};
+    const localList = Array.isArray(map[vlogId]) ? map[vlogId] : [];
+    const seeds = SEED_REEL_COMMENTS[vlogId] || [];
+    const seen = new Set(localList.map((c) => c.id));
+    return [...localList, ...seeds.filter((s) => !seen.has(s.id))];
+  } catch {
+    return SEED_REEL_COMMENTS[vlogId] || [];
+  }
+}
+
+export function addReelComment(
+  vlogId: string,
+  uid: string,
+  authorName: string,
+  text: string
+): { success: boolean; comment?: ReelComment; error?: string } {
+  const cleanText = text.trim().slice(0, 220);
+  if (!cleanText) {
+    return { success: false, error: 'Please write a comment before posting.' };
+  }
+
+  const safety = checkVlogContentSafety(cleanText, '');
+  if (!safety.isSafe) {
+    return {
+      success: false,
+      error: 'Comment blocked by Family Safety Guidelines. Please keep comments respectful and all-ages friendly.',
+    };
+  }
+
+  const newComment: ReelComment = {
+    id: `rc_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+    vlogId,
+    uid,
+    authorName: authorName.trim().slice(0, 40) || 'Learner',
+    text: cleanText,
+    createdAt: new Date().toISOString(),
+  };
+
+  if (typeof window !== 'undefined') {
+    try {
+      const raw = localStorage.getItem(REEL_COMMENTS_KEY);
+      const map: Record<string, ReelComment[]> = raw ? JSON.parse(raw) : {};
+      const existing = Array.isArray(map[vlogId]) ? map[vlogId] : [];
+      map[vlogId] = [newComment, ...existing].slice(0, 60);
+      localStorage.setItem(REEL_COMMENTS_KEY, JSON.stringify(map));
+    } catch {}
+  }
+
+  return { success: true, comment: newComment };
+}
+
+export function getReelsRewardedToday(uid?: string | null): string[] {
+  if (typeof window === 'undefined') return [];
+  const todayStr = new Date().toISOString().slice(0, 10);
+  try {
+    const raw = localStorage.getItem(`${REEL_REWARDS_PREFIX}${uid || 'guest'}`);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (parsed?.date === todayStr && Array.isArray(parsed.ids)) {
+        return parsed.ids;
+      }
+    }
+  } catch {}
+  return [];
+}
+
+export function recordReelWatchReward(
+  vlogId: string,
+  uid?: string | null
+): { awarded: boolean; countToday: number } {
+  const todayStr = new Date().toISOString().slice(0, 10);
+  const safeUid = uid || 'guest';
+  const ids = getReelsRewardedToday(safeUid);
+  if (ids.includes(vlogId) || ids.length >= MAX_DAILY_REEL_WATCH_REWARDS) {
+    return { awarded: false, countToday: ids.length };
+  }
+  const nextIds = [...ids, vlogId];
+  if (typeof window !== 'undefined') {
+    try {
+      localStorage.setItem(
+        `${REEL_REWARDS_PREFIX}${safeUid}`,
+        JSON.stringify({ date: todayStr, ids: nextIds })
+      );
+    } catch {}
+  }
+  return { awarded: true, countToday: nextIds.length };
+}
+

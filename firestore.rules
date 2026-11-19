@@ -6,7 +6,7 @@ service cloud.firestore {
     function isAdmin() {
       return request.auth != null &&
         request.auth.token.email != null &&
-        request.auth.token.email.lower() == 'fatimakiduniya362@gmail.com' &&
+        request.auth.token.email.lower() == 'romeelajutt23@gmail.com' &&
         request.auth.token.email_verified == true;
     }
 
@@ -15,10 +15,10 @@ service cloud.firestore {
       // Users can only read their own wallet document; Admin can read all users
       allow read: if request.auth != null && (request.auth.uid == userId || isAdmin());
 
-      // New users start at zero! Points must equal 0, approvedBalanceUSD must be 0
+      // New users must start at 0 current points; approvedBalanceUSD must be 0
       allow create: if request.auth != null &&
         request.auth.uid == userId &&
-        request.resource.data.points <= 0 &&
+        request.resource.data.points == 0 &&
         (!('approvedBalanceUSD' in request.resource.data) || request.resource.data.approvedBalanceUSD <= 0) &&
         (!('role' in request.resource.data) || request.resource.data.role == 'member');
 
@@ -27,8 +27,9 @@ service cloud.firestore {
       // 2. approvedBalanceUSD CANNOT be modified by users (only admin/cloud system on published months)
       // 3. publishedMonthsCredited CANNOT be modified by users
       // 4. isExcludedFromPool CANNOT be modified by users
-      // 5. Points can only increase by at most daily ceiling (2500 pts) per update or decrease
-      // 6. Streak can only increase by at most 1 day per update
+      // 5. pointsResetMigrationId / pointsResetAt CANNOT be tampered with by non-admin users
+      // 6. Points can only increase by at most 50 pts per verified transaction (eligible activity +1 or verified referral +50) or decrease
+      // 7. Streak can only increase by at most 1 day per update
       allow update: if request.auth != null &&
         (
           isAdmin() ||
@@ -38,11 +39,12 @@ service cloud.firestore {
             (!('approvedBalanceUSD' in request.resource.data) || request.resource.data.approvedBalanceUSD == resource.data.approvedBalanceUSD) &&
             (!('publishedMonthsCredited' in request.resource.data) || request.resource.data.publishedMonthsCredited == resource.data.publishedMonthsCredited) &&
             (!('isExcludedFromPool' in request.resource.data) || request.resource.data.isExcludedFromPool == resource.data.isExcludedFromPool) &&
+            (!('pointsResetMigrationId' in request.resource.data) || request.resource.data.pointsResetMigrationId == resource.data.pointsResetMigrationId) &&
             (
-              // Points reduction (e.g. perk spend)
+              // Points reduction (e.g. conversion or perk spend)
               request.resource.data.points <= resource.data.points ||
-              // Safe points increase within daily max limit (2500 pts max jump)
-              (request.resource.data.points - resource.data.points <= 2500)
+              // Strict per-update cap (+1 eligible activity or +50 verified referral)
+              (request.resource.data.points - resource.data.points <= 50)
             ) &&
             (
               !('streakDays' in request.resource.data) ||
@@ -78,6 +80,89 @@ service cloud.firestore {
           request.auth.uid == userId &&
           request.resource.data.userId == userId &&
           request.resource.data.date == dateStr;
+        allow delete: if false;
+      }
+
+      // Immutable Reward Ledger (unique txId prevents duplicate rewards forever)
+      match /reward_ledger/{txId} {
+        allow read: if request.auth != null && (request.auth.uid == userId || isAdmin());
+        allow create: if request.auth != null && (
+          isAdmin() ||
+          (
+            request.auth.uid == userId &&
+            request.resource.data.uid == userId &&
+            request.resource.data.txId == txId &&
+            request.resource.data.points is int &&
+            request.resource.data.points >= -500000 &&
+            request.resource.data.points <= 2500 &&
+            request.resource.data.reason is string &&
+            request.resource.data.reason.size() > 0 &&
+            request.resource.data.reason.size() <= 200
+          )
+        );
+        allow update, delete: if false;
+      }
+
+      // Immutable Reconciliation & Points Recovery Audit Log
+      match /reconciliation_logs/{logId} {
+        allow read: if request.auth != null && (request.auth.uid == userId || isAdmin());
+        allow create: if request.auth != null && (request.auth.uid == userId || isAdmin());
+        allow update, delete: if false;
+      }
+
+      // Daily Learning Streak state & completed calendar dates per user
+      match /learning_streak/{docId} {
+        allow read: if request.auth != null && (request.auth.uid == userId || isAdmin());
+        allow create, update: if request.auth != null &&
+          request.auth.uid == userId &&
+          request.resource.data.uid == userId;
+        allow delete: if false;
+      }
+
+      // Notification Control Center preferences per user
+      match /notification_settings/{docId} {
+        allow read: if request.auth != null && (request.auth.uid == userId || isAdmin());
+        allow create, update: if request.auth != null &&
+          request.auth.uid == userId &&
+          request.resource.data.uid == userId;
+        allow delete: if false;
+      }
+
+      // App Preferences (Data Saver & Video Quality settings) per user
+      match /app_preferences/{docId} {
+        allow read: if request.auth != null && (request.auth.uid == userId || isAdmin());
+        allow create, update: if request.auth != null &&
+          request.auth.uid == userId &&
+          request.resource.data.uid == userId;
+        allow delete: if false;
+      }
+
+      // Active Device Sessions (strictly private to account owner — never readable by other users)
+      match /sessions/{sessionId} {
+        allow read: if request.auth != null && request.auth.uid == userId;
+        allow create, update: if request.auth != null &&
+          request.auth.uid == userId &&
+          request.resource.data.uid == userId &&
+          request.resource.data.sessionId == sessionId;
+        allow delete: if false;
+      }
+
+      // Immutable Account Security & Login Activity Log (strictly private to account owner)
+      match /security_events/{eventId} {
+        allow read: if request.auth != null && request.auth.uid == userId;
+        allow create: if request.auth != null &&
+          request.auth.uid == userId &&
+          request.resource.data.uid == userId;
+        allow update, delete: if false;
+      }
+
+      // Offline Learning Mode: synced lesson completions per user (conflict-free merge)
+      match /offline_learning_progress/{packId} {
+        allow read: if request.auth != null && (request.auth.uid == userId || isAdmin());
+        allow create, update: if request.auth != null &&
+          request.auth.uid == userId &&
+          request.resource.data.uid == userId &&
+          request.resource.data.packId == packId;
         allow delete: if false;
       }
     }
@@ -190,37 +275,71 @@ service cloud.firestore {
       allow create, update, delete: if isAdmin();
     }
 
-    // Community Vlogs collection
+    // Connectivity check document (read-only)
+    match /test/connection {
+      allow read: if true;
+      allow write: if false;
+    }
+
+    // Weekly Challenge Leaderboard
+    match /weekly_challenges/{weekKey}/entries/{entryId} {
+      allow read: if true;
+      allow create, update: if request.auth != null && request.auth.uid == entryId;
+      allow delete: if isAdmin();
+    }
+
+    // Community Vlogs collection (supports both Cloud Storage video uploads and YouTube vlogs)
     match /vlogs/{vlogId} {
       // Approved vlogs with < 3 reports are public; creators can read their own submissions; admin can read all
       allow read: if (resource.data.status == 'approved' && (!('reportCount' in resource.data) || resource.data.reportCount < 3)) ||
                      (request.auth != null && resource.data.uid == request.auth.uid) ||
                      isAdmin();
 
-      // Signed-in users can submit a vlog: must start as 'pending', reportCount 0, valid title & description lengths
+      // Signed-in users can publish a cloud-hosted video (videoUrl) or submit a YouTube vlog (videoId)
       allow create: if request.auth != null &&
         request.resource.data.uid == request.auth.uid &&
-        request.resource.data.status == 'pending' &&
+        request.resource.data.status in ['approved', 'pending'] &&
         request.resource.data.reportCount == 0 &&
+        (!('likeCount' in request.resource.data) || request.resource.data.likeCount == 0) &&
         request.resource.data.title is string &&
         request.resource.data.title.size() > 0 &&
-        request.resource.data.title.size() <= 80 &&
-        request.resource.data.description is string &&
-        request.resource.data.description.size() <= 300 &&
-        request.resource.data.videoId is string &&
-        request.resource.data.videoId.size() == 11 &&
+        request.resource.data.title.size() <= 120 &&
+        (!('description' in request.resource.data) || (request.resource.data.description is string && request.resource.data.description.size() <= 400)) &&
+        (
+          (request.resource.data.videoUrl is string && request.resource.data.videoUrl.matches('^https://.*')) ||
+          (request.resource.data.videoId is string && request.resource.data.videoId.size() == 11)
+        ) &&
         request.resource.data.category in ['cooking', 'gardening', 'home and family', 'health', 'nature', 'learning', 'travel', 'funny and wholesome', 'other'];
 
-      // Updates: Admin can update any field; users can increment reportCount for reporting
+      // Updates: Admin can update any field; users can report (reportCount + 1) or like/unlike (likeCount +/- 1)
       allow update: if isAdmin() ||
         (
           // Allow reporting a vlog: only reportCount changes
           request.resource.data.diff(resource.data).affectedKeys().hasOnly(['reportCount']) &&
-          request.resource.data.reportCount == resource.data.reportCount + 1
+          request.resource.data.reportCount == (('reportCount' in resource.data ? resource.data.reportCount : 0) + 1)
+        ) ||
+        (
+          // Allow signed-in users to increment or decrement likeCount by exactly 1
+          request.auth != null &&
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['likeCount']) &&
+          request.resource.data.likeCount is int &&
+          request.resource.data.likeCount >= 0 &&
+          (
+            request.resource.data.likeCount == (('likeCount' in resource.data ? resource.data.likeCount : 0) + 1) ||
+            request.resource.data.likeCount == (('likeCount' in resource.data ? resource.data.likeCount : 0) - 1)
+          )
         );
 
       // Deletions: Admin or the vlog's creator
       allow delete: if isAdmin() || (request.auth != null && resource.data.uid == request.auth.uid);
+
+      // Per-account likes subcollection (prevents duplicate likes across devices)
+      match /likes/{userId} {
+        allow read: if true;
+        allow create: if request.auth != null && request.auth.uid == userId;
+        allow delete: if request.auth != null && request.auth.uid == userId;
+        allow update: if false;
+      }
     }
 
     // Community Vlog Reports collection
@@ -235,6 +354,48 @@ service cloud.firestore {
     match /blocked_creators/{creatorUid} {
       allow read: if true;
       allow create, update, delete: if isAdmin();
+    }
+
+    // Unique Referral Codes directory (maps code -> referrerUid)
+    match /referral_codes/{code} {
+      allow read: if request.auth != null;
+      allow create, update: if request.auth != null &&
+        request.resource.data.referrerUid == request.auth.uid &&
+        request.resource.data.code == code;
+      allow delete: if false;
+    }
+
+    // Verified Referrals collection (1 immutable document per referred user UID)
+    // Blocks self-referrals, duplicate accounts, and reward tampering
+    match /referrals/{referredUid} {
+      allow read: if request.auth != null && (
+        request.auth.uid == referredUid ||
+        resource.data.referrerUid == request.auth.uid ||
+        isAdmin()
+      );
+      allow create: if request.auth != null &&
+        request.auth.uid == referredUid &&
+        request.resource.data.referredUid == referredUid &&
+        request.resource.data.referrerUid is string &&
+        request.resource.data.referrerUid != request.auth.uid &&
+        request.resource.data.rewardPoints == 50 &&
+        request.resource.data.status == 'verified' &&
+        request.resource.data.creditedToReferrer == false;
+      allow update: if request.auth != null && (
+        isAdmin() ||
+        (
+          resource.data.referrerUid == request.auth.uid &&
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['creditedToReferrer', 'creditedAt']) &&
+          request.resource.data.creditedToReferrer == true
+        )
+      );
+      allow delete: if false;
+    }
+
+    // Controlled Migration Backups (strictly owner-only read/write, never deletable)
+    match /migration_backups/{migrationId}/users/{userId} {
+      allow read, create, update: if isAdmin();
+      allow delete: if false;
     }
   }
 }

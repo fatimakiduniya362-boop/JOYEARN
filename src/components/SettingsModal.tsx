@@ -17,25 +17,19 @@ import {
   Maximize2,
   Minimize2,
   LogIn,
-  LogOut,
   Mail,
   User,
-  Sliders,
   ShieldAlert,
   ShieldCheck,
-  HelpCircle,
   Eye,
   Star,
   Sparkles,
   Megaphone,
-  Bell,
-  BellOff,
   HardDrive,
   Film,
   RotateCcw,
   Check,
-  BarChart3,
-  Activity
+  BarChart3
 } from 'lucide-react';
 import { AppUser } from '../types';
 import { soundService } from '../services/soundService';
@@ -44,6 +38,9 @@ import { hapticService } from '../services/haptics';
 import { VirtualCurrencyDisclaimer } from './VirtualCurrencyDisclaimer';
 import { ADMIN_EMAIL } from './AdminWithdrawalModal';
 import { appSettingsService } from '../services/appSettingsService';
+import { NotificationControlPanel } from './NotificationControlPanel';
+import { DataSaverControlPanel } from './DataSaverControlPanel';
+import { AccountSecurityPanel } from './AccountSecurityPanel';
 
 interface SettingsModalProps {
   onClose: () => void;
@@ -126,15 +123,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const [hapticEnabled, setHapticEnabled] = useState(
     typeof window !== 'undefined' ? localStorage.getItem('joyearn_haptic_disabled') !== 'true' : true
   );
-  const [notificationsEnabled, setNotificationsEnabled] = useState(() => {
-    try {
-      return localStorage.getItem('joyearn_notifications_enabled') !== 'false';
-    } catch {
-      return true;
-    }
-  });
   const [cacheNotice, setCacheNotice] = useState(false);
-  const [activeTab, setActiveTab] = useState<'all' | 'account' | 'prefs' | 'system'>('all');
 
   // SMART CACHE MANAGEMENT STATE (Offline Video Storage Limit & Auto-Cleanup)
   const [maxVideoStorageMB, setMaxVideoStorageMB] = useState<number>(() => {
@@ -363,7 +352,12 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     </button>
                   </div>
 
-                  {/* Owner Panel Button - ONLY visible for fatimakiduniya362@gmail.com or active owner */}
+                  {/* Account Security Center (Active Sessions, Recent Logins, Remote Sign-Out) */}
+                  <div className="pt-2 border-t border-rose-200/60">
+                    <AccountSecurityPanel userUid={currentUser.uid} isUrdu={isUrdu} />
+                  </div>
+
+                  {/* Owner Panel Button - ONLY visible for romeelajutt23@gmail.com or active owner */}
                   {(() => {
                     const activeOwnerEmail = (appSettingsService.getSettings().general?.ownerEmail || ADMIN_EMAIL).trim().toLowerCase();
                     const isOwner = Boolean(
@@ -619,41 +613,14 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 )}
               </div>
 
-              {/* Daily Streak & Bonus Push Notifications */}
-              <div className="flex items-center justify-between pt-1 border-t border-slate-200/60">
-                <div className="flex-1 pr-2">
-                  <div className="text-slate-800 flex items-center gap-1.5 text-xs font-bold">
-                    {notificationsEnabled ? (
-                      <Bell className="w-3.5 h-3.5 text-indigo-600" />
-                    ) : (
-                      <BellOff className="w-3.5 h-3.5 text-slate-400" />
-                    )}
-                    <span>{isUrdu ? 'اطلاعات اور یاد دہانی (Notifications)' : 'Daily Streak Reminders'}</span>
-                  </div>
-                  <div className="text-[10px] text-slate-500">
-                    {isUrdu ? 'روزانہ اسپن اور ہدف کی یاد دہانی' : 'Streak protection alert & login bonus alerts'}
-                  </div>
-                </div>
-                <button
-                  onClick={() => {
-                    const next = !notificationsEnabled;
-                    setNotificationsEnabled(next);
-                    soundService.playClick();
-                    hapticService.selection();
-                    try {
-                      localStorage.setItem('joyearn_notifications_enabled', String(next));
-                    } catch {}
-                  }}
-                  className={`w-10 h-5.5 rounded-full p-0.5 transition-colors shrink-0 ${
-                    notificationsEnabled ? 'bg-indigo-600' : 'bg-slate-300'
-                  }`}
-                >
-                  <div
-                    className={`w-4.5 h-4.5 rounded-full bg-white shadow-xs transform transition-transform ${
-                      notificationsEnabled ? 'translate-x-4.5' : 'translate-x-0'
-                    }`}
-                  />
-                </button>
+              {/* Smart Notification Control Center */}
+              <div className="pt-2 border-t border-slate-200/60">
+                <NotificationControlPanel userUid={currentUser?.uid} isUrdu={isUrdu} />
+              </div>
+
+              {/* Smart Data Saver & Video Quality */}
+              <div className="pt-2 border-t border-slate-200/60">
+                <DataSaverControlPanel userUid={currentUser?.uid} isUrdu={isUrdu} />
               </div>
             </div>
           </div>
@@ -1156,7 +1123,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   <Mail className="w-3.5 h-3.5 text-indigo-500" />
                   <span>{isUrdu ? 'ہم سے رابطہ کریں (Contact Us)' : 'Contact Us'}</span>
                 </span>
-                <span className="text-[10px] text-slate-400 font-mono">fatimakiduniya362@gmail.com</span>
+                <span className="text-[10px] text-slate-400 font-mono">romeelajutt23@gmail.com</span>
               </button>
 
               {onOpenRateApp && (
@@ -1275,18 +1242,18 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 </p>
                 <div className="p-3 bg-slate-100 dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 space-y-1">
                   <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Official Support Email</span>
-                  <p className="font-mono font-bold text-xs text-indigo-600 dark:text-indigo-400 select-all">fatimakiduniya362@gmail.com</p>
+                  <p className="font-mono font-bold text-xs text-indigo-600 dark:text-indigo-400 select-all">romeelajutt23@gmail.com</p>
                 </div>
                 <div className="grid grid-cols-2 gap-2">
                   <a
-                    href="mailto:fatimakiduniya362@gmail.com"
+                    href="mailto:romeelajutt23@gmail.com"
                     className="py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold tap-bounce text-center"
                   >
                     Open Mail App
                   </a>
                   <button
                     onClick={() => {
-                      navigator.clipboard?.writeText('fatimakiduniya362@gmail.com');
+                      navigator.clipboard?.writeText('romeelajutt23@gmail.com');
                       setCopyEmailSuccess(true);
                       setTimeout(() => setCopyEmailSuccess(false), 2500);
                     }}
@@ -1315,9 +1282,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 </div>
                 <div className="flex-1 overflow-y-auto space-y-2.5 text-xs text-slate-600 dark:text-slate-300 pr-1 text-left leading-relaxed">
                   <p><strong>1. Educational & Family Purpose:</strong> JoyEarn is designed for educational enrichment, daily family quizzes, and wholesome knowledge discovery.</p>
-                  <p><strong>2. Ad-Funded Rewards & Cash Withdrawals:</strong> Rewards depend on ad revenue, are reviewed manually and are not guaranteed. Fake, duplicate or invalid activity will be rejected.</p>
+                  <p><strong>2. Ad-Funded Rewards & Cash Withdrawals:</strong> Rewards depend on ad revenue, are reviewed manually and are not guaranteed. Amounts may be very small. Fake, duplicate or invalid activity will be rejected.</p>
                   <p><strong>3. Fair Use & Anti-Cheat:</strong> Points must be earned honestly through gameplay, quizzes, streaks, and viewing optional rewarded ads. Automated bots, clicking tricks, duplicate accounts, and fraudulent activity are prohibited and will result in rejected payouts.</p>
-                  <p><strong>4. Contact & Support:</strong> For payment inquiries or account support, contact us at <code>fatimakiduniya362@gmail.com</code>.</p>
+                  <p><strong>4. Contact & Support:</strong> For payment inquiries or account support, contact us at <code>romeelajutt23@gmail.com</code>.</p>
                 </div>
                 <button
                   onClick={() => setShowTermsModal(false)}

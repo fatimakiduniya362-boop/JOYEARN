@@ -2,16 +2,46 @@ plugins {
     id 'com.android.application'
 }
 
+// Read production AdMob IDs from local.properties or Gradle properties (-PADMOB_APP_ID=...).
+// Production builds NEVER fall back to Google's test IDs.
+def localProps = new Properties()
+def localPropsFile = rootProject.file('local.properties')
+if (localPropsFile.exists()) {
+    localPropsFile.withInputStream { localProps.load(it) }
+}
+
+def readProp = { String key ->
+    def val = project.findProperty(key) ?: localProps.getProperty(key) ?: System.getenv(key) ?: ""
+    return val.toString().trim()
+}
+
+def prodAdmobAppId = readProp('ADMOB_APP_ID')
+def prodBannerUnitId = readProp('ADMOB_BANNER_UNIT_ID')
+def prodInterstitialUnitId = readProp('ADMOB_INTERSTITIAL_UNIT_ID')
+def prodRewardedUnitId = readProp('ADMOB_REWARDED_UNIT_ID')
+def prodNativeUnitId = readProp('ADMOB_NATIVE_UNIT_ID')
+
+// Official Google Test IDs — used ONLY in debug builds
+def testAdmobAppId = "ca-app-pub-3940256099942544~3347511713"
+def testBannerUnitId = "ca-app-pub-3940256099942544/6300978111"
+def testInterstitialUnitId = "ca-app-pub-3940256099942544/1033173712"
+def testRewardedUnitId = "ca-app-pub-3940256099942544/5224354917"
+def testNativeUnitId = "ca-app-pub-3940256099942544/2247696110"
+
 android {
     namespace 'com.joyearn.rewards.learning'
     compileSdk 34
+
+    buildFeatures {
+        buildConfig true
+    }
 
     defaultConfig {
         applicationId "com.joyearn.rewards.learning"
         minSdk 21
         targetSdk 34
-        versionCode 2
-        versionName "1.2.0"
+        versionCode 3
+        versionName "1.2.1"
 
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -22,10 +52,32 @@ android {
             shrinkResources true
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
             // Signing configuration is selected in Android Studio via Build > Generate Signed Bundle / APK
+
+            // Production AdMob IDs must be supplied via local.properties or Gradle properties;
+            // test IDs are never injected into release builds.
+            manifestPlaceholders = [
+                admobAppId: prodAdmobAppId
+            ]
+            buildConfigField "boolean", "IS_ADMOB_TEST_MODE", "false"
+            buildConfigField "String", "ADMOB_APP_ID", "\"${prodAdmobAppId}\""
+            buildConfigField "String", "ADMOB_BANNER_UNIT_ID", "\"${prodBannerUnitId}\""
+            buildConfigField "String", "ADMOB_INTERSTITIAL_UNIT_ID", "\"${prodInterstitialUnitId}\""
+            buildConfigField "String", "ADMOB_REWARDED_UNIT_ID", "\"${prodRewardedUnitId}\""
+            buildConfigField "String", "ADMOB_NATIVE_UNIT_ID", "\"${prodNativeUnitId}\""
         }
         debug {
             applicationIdSuffix ".debug"
             debuggable true
+
+            manifestPlaceholders = [
+                admobAppId: testAdmobAppId
+            ]
+            buildConfigField "boolean", "IS_ADMOB_TEST_MODE", "true"
+            buildConfigField "String", "ADMOB_APP_ID", "\"${testAdmobAppId}\""
+            buildConfigField "String", "ADMOB_BANNER_UNIT_ID", "\"${testBannerUnitId}\""
+            buildConfigField "String", "ADMOB_INTERSTITIAL_UNIT_ID", "\"${testInterstitialUnitId}\""
+            buildConfigField "String", "ADMOB_REWARDED_UNIT_ID", "\"${testRewardedUnitId}\""
+            buildConfigField "String", "ADMOB_NATIVE_UNIT_ID", "\"${testNativeUnitId}\""
         }
     }
 
@@ -35,9 +87,35 @@ android {
     }
 }
 
+// Guard: prevent accidental release builds without real production AdMob IDs
+gradle.taskGraph.whenReady { taskGraph ->
+    def isReleaseTask = taskGraph.allTasks.any { t ->
+        t.name.toLowerCase().contains('release') &&
+        (t.name.toLowerCase().contains('bundle') || t.name.toLowerCase().contains('assemble'))
+    }
+    if (isReleaseTask) {
+        def missing = []
+        if (!prodAdmobAppId || prodAdmobAppId.contains("3940256099942544")) missing << "ADMOB_APP_ID"
+        if (!prodBannerUnitId || prodBannerUnitId.contains("3940256099942544")) missing << "ADMOB_BANNER_UNIT_ID"
+        if (!prodInterstitialUnitId || prodInterstitialUnitId.contains("3940256099942544")) missing << "ADMOB_INTERSTITIAL_UNIT_ID"
+        if (!prodRewardedUnitId || prodRewardedUnitId.contains("3940256099942544")) missing << "ADMOB_REWARDED_UNIT_ID"
+        if (!prodNativeUnitId || prodNativeUnitId.contains("3940256099942544")) missing << "ADMOB_NATIVE_UNIT_ID"
+        if (!missing.isEmpty()) {
+            throw new GradleException(
+                "Missing real production AdMob IDs in local.properties or Gradle properties: ${missing.join(', ')}. " +
+                "Release builds will not fall back to Google test IDs."
+            )
+        }
+    }
+}
+
 dependencies {
     implementation 'androidx.appcompat:appcompat:1.6.1'
     implementation 'com.google.android.material:material:1.11.0'
     implementation 'androidx.browser:browser:1.8.0'
     implementation 'com.google.androidbrowserhelper:androidbrowserhelper:2.5.0'
+
+    // Google Mobile Ads SDK (AdMob) & User Messaging Platform (UMP Consent SDK)
+    implementation 'com.google.android.gms:play-services-ads:23.3.0'
+    implementation 'com.google.android.ump:user-messaging-platform:3.0.0'
 }

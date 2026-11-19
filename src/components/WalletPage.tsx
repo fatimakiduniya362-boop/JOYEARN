@@ -2,19 +2,13 @@ import React, { useState, useEffect, useMemo } from 'react';
 import {
   Wallet,
   Sparkles,
-  TrendingUp,
   ArrowDownToLine,
-  ArrowLeft,
   ShieldCheck,
   CheckCircle2,
   XCircle,
   Clock,
-  ExternalLink,
   ChevronRight,
-  Info,
-  DollarSign,
   Play,
-  RotateCcw,
   AlertCircle,
   X,
   CreditCard,
@@ -24,9 +18,16 @@ import {
   Lock,
   ArrowRight,
   Download,
-  FileSpreadsheet
+  Search,
+  Bell,
+  User,
+  Gift,
+  Calendar,
+  History,
+  Trophy,
+  Star
 } from 'lucide-react';
-import { TransactionRecord, AppUser, PaymentMethodType, WithdrawalRequest } from '../types';
+import { TransactionRecord, AppUser, WithdrawalRequest } from '../types';
 import { soundService } from '../services/soundService';
 import { useHaptics } from '../hooks/useHaptics';
 import { submitWithdrawalRequestToCloud, loadUserWithdrawals } from '../services/firestoreService';
@@ -44,9 +45,9 @@ import {
   POOL_CARRY_OVER,
   MANDATORY_REWARDS_NOTICE,
   POOL_REVENUE_NOTICE,
-  UNPUBLISHED_MONTH_NOTICE,
   PAYOUT_REVIEW_TEXT,
   PAYOUT_REVIEW_NOTICE,
+  getConfiguredPointsPerDollar,
 } from '../config/paymentConfig';
 import { calculatePayoutFee } from '../services/monthlyPoolService';
 
@@ -89,6 +90,10 @@ interface WalletPageProps {
   currentUser: AppUser | null;
   onOpenAdminPortal?: () => void;
   onBackToHome?: () => void;
+  onOpenNotifications?: () => void;
+  onOpenProfile?: () => void;
+  unreadNotificationCount?: number;
+  onOpenTasks?: () => void;
 }
 
 export const WalletPage: React.FC<WalletPageProps> = ({
@@ -103,11 +108,18 @@ export const WalletPage: React.FC<WalletPageProps> = ({
   currentUser,
   onOpenAdminPortal,
   onBackToHome,
+  onOpenNotifications,
+  onOpenProfile,
+  unreadNotificationCount = 0,
+  onOpenTasks,
 }) => {
   const { light, success, warning, heavy, selection } = useHaptics();
 
   // Tab: 'overview' | 'withdraw' | 'history'
   const [activeTab, setActiveTab] = useState<'overview' | 'withdraw' | 'history'>('overview');
+  const [walletSearchOpen, setWalletSearchOpen] = useState(false);
+  const [walletSearchQuery, setWalletSearchQuery] = useState('');
+  const tabContentRef = React.useRef<HTMLDivElement | null>(null);
 
   // Interactive 4 Summary Cards Modal State
   const [activeSummaryModal, setActiveSummaryModal] = useState<SummaryModalType>(null);
@@ -193,9 +205,6 @@ export const WalletPage: React.FC<WalletPageProps> = ({
 
   const [withdrawalNotice, setWithdrawalNotice] = useState<string | null>(null);
   const [withdrawalError, setWithdrawalError] = useState<string | null>(null);
-
-  // Active pending transactions & rewards
-  const pendingTransactions = transactions.filter((t) => t.status === 'Pending');
 
   // Requirements Checklist calculations
   const userAccountAgeDays = useMemo(() => {
@@ -309,25 +318,6 @@ export const WalletPage: React.FC<WalletPageProps> = ({
       );
       setTimeout(() => setWithdrawalError(null), 6000);
     }
-  };
-
-  // Rewarded Ad Simulation Countdown
-  const handleWatchRewardedAd = () => {
-    if (cooldownRemaining > 0 || simulatedAdPlaying) return;
-    soundService.playClick();
-    light();
-    setSimulatedAdPlaying(true);
-    setSimulatedAdSeconds(5);
-
-    const timer = setInterval(() => {
-      setSimulatedAdSeconds((prev) => {
-        if (prev <= 1) {
-          clearInterval(timer);
-          return 0;
-        }
-        return prev - 1;
-      });
-    }, 1000);
   };
 
   useEffect(() => {
@@ -534,7 +524,7 @@ export const WalletPage: React.FC<WalletPageProps> = ({
         userUid: currentUser?.uid || 'device_user',
         userName: withdrawalAccountTitle.trim(),
         userEmail: currentUser?.email || 'user@joyearn.com',
-        points: Math.round(withdrawalAmountUSD * 1000), // legacy point logging reference
+        points: Math.round(withdrawalAmountUSD * getConfiguredPointsPerDollar()), // active 8,000-10,000 pts/$1 logging reference
         cashAmount: feeCalc.gross,
         feePercent: feeCalc.feePercent,
         feeAmount: feeCalc.feeAmount,
@@ -581,213 +571,514 @@ export const WalletPage: React.FC<WalletPageProps> = ({
       console.error('Withdrawal submission error:', err);
       setIsSubmitting(false);
       warning();
-      setWithdrawalError(err?.message || 'Failed to submit withdrawal request. Please check connection and retry.');
+      setWithdrawalError(err?.message || 'Unable to submit withdrawal request right now. Please try again later.');
     }
   };
 
+  // Real computed USD & period summaries (strictly from real user data using active 8,000-10,000 pts/$1 rate)
+  const activePointsPerDollar = getConfiguredPointsPerDollar();
+  const effectiveLifetimePoints = Math.max(totalJoyPointsEarned, points);
+  const availablePointsUSD = points / activePointsPerDollar;
+  const totalEarnedUSD = effectiveLifetimePoints / activePointsPerDollar;
+
+  const { thisWeekUSD, thisMonthUSD } = useMemo(() => {
+    const now = Date.now();
+    const sevenDaysMs = 7 * 24 * 60 * 60 * 1000;
+    const currentMonthPrefix = new Date().toISOString().slice(0, 7);
+    let weekPts = 0;
+    let monthPts = 0;
+
+    for (const tx of transactions) {
+      if (tx.type !== 'earn' || typeof tx.points !== 'number' || tx.points <= 0) continue;
+      if (tx.date === 'Just now' || tx.date === 'Today') {
+        weekPts += tx.points;
+        monthPts += tx.points;
+        continue;
+      }
+      const parsed = Date.parse(tx.date);
+      if (!Number.isNaN(parsed)) {
+        if (now - parsed <= sevenDaysMs) weekPts += tx.points;
+        if (new Date(parsed).toISOString().slice(0, 7) === currentMonthPrefix) monthPts += tx.points;
+      }
+    }
+
+    return {
+      thisWeekUSD: Math.max(todayPoints, weekPts) / activePointsPerDollar,
+      thisMonthUSD: Math.max(todayPoints, monthPts) / activePointsPerDollar,
+    };
+  }, [transactions, todayPoints, activePointsPerDollar]);
+
+  const pendingWithdrawalsUSD = useMemo(() => {
+    return userWithdrawals
+      .filter((w) => w.status === 'Pending' || w.status === 'Submitted' || w.status === 'Under review')
+      .reduce((sum, w) => {
+        const gross = typeof w.cashAmount === 'number' ? w.cashAmount : (w.points || 0) / activePointsPerDollar;
+        return sum + gross;
+      }, 0);
+  }, [userWithdrawals, activePointsPerDollar]);
+
+  const filteredTransactions = useMemo(() => {
+    const q = walletSearchQuery.trim().toLowerCase();
+    if (!q) return transactions;
+    return transactions.filter(
+      (tx) =>
+        tx.title.toLowerCase().includes(q) ||
+        tx.status.toLowerCase().includes(q) ||
+        tx.date.toLowerCase().includes(q) ||
+        String(tx.points).includes(q)
+    );
+  }, [transactions, walletSearchQuery]);
+
+  const scrollToTabContent = () => {
+    requestAnimationFrame(() => {
+      tabContentRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+  };
+
   return (
-    <div className="w-full flex flex-col bg-slate-50 min-h-full pb-28">
-      {/* Wallet Header */}
-      <div className="bg-gradient-to-r from-sky-500 via-sky-600 to-blue-600 text-white p-4 shadow-md">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            {onBackToHome && (
-              <button
-                onClick={onBackToHome}
-                className="p-1.5 rounded-xl bg-white/20 hover:bg-white/30 text-white tap-bounce shrink-0"
-                title="Back to Home"
-              >
-                <ArrowLeft className="w-4 h-4" />
-              </button>
-            )}
-            <div className="w-10 h-10 rounded-2xl bg-white/20 backdrop-blur-xs flex items-center justify-center text-xl shadow-inner shrink-0">
-              💼
-            </div>
-            <div>
-              <h1 className={`font-black flex items-center gap-1.5 ${seniorMode ? 'text-2xl' : 'text-lg'}`}>
-                {seniorMode ? 'والیٹ اور محفوظ کیش آؤٹ' : 'Wallet & Rewards'}
-              </h1>
-              <p className="text-xs text-sky-100 font-medium">
-                Verified genuine rewards • Ad revenue backed
-              </p>
-            </div>
+    <div className="w-full flex flex-col bg-white min-h-screen pb-28 max-w-lg mx-auto">
+      {/* 1. STICKY PINK-AND-WHITE HEADER */}
+      <header className="sticky top-0 z-30 bg-white/95 backdrop-blur-md">
+        <div className="px-4 pt-3.5 pb-2.5 flex items-center justify-between">
+          {/* Left: JoyEarn Logo */}
+          <div className="flex items-center gap-2.5">
+            <button
+              type="button"
+              onClick={() => {
+                soundService.playClick();
+                onBackToHome?.();
+              }}
+              className="w-9 h-9 rounded-[11px] bg-gradient-to-br from-[#ff1b8d] to-[#d9006c] flex items-center justify-center shadow-sm tap-bounce"
+              aria-label="JoyEarn Home"
+            >
+              <Play className="w-[18px] h-[18px] text-white fill-white ml-0.5" />
+            </button>
+            <span className="text-[22px] font-extrabold tracking-tight text-[#ec0078] leading-none">
+              JoyEarn
+            </span>
           </div>
 
-          {(currentUser?.email === 'admin@joyearn.com' || currentUser?.email === 'fatimakiduniya362@gmail.com') && onOpenAdminPortal && (
+          {/* Right: Admin Portal (owner only), Search, Notification Bell, Profile Avatar */}
+          <div className="flex items-center gap-2.5">
+            {currentUser?.email?.trim().toLowerCase() === 'romeelajutt23@gmail.com' &&
+              onOpenAdminPortal && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    soundService.playClick();
+                    onOpenAdminPortal();
+                  }}
+                  className="text-[10.5px] font-black bg-pink-100 text-[#9d174d] hover:bg-pink-200 px-2.5 py-1 rounded-full tap-bounce"
+                >
+                  Admin
+                </button>
+              )}
+
             <button
-              onClick={onOpenAdminPortal}
-              className="text-[11px] font-bold bg-white/20 hover:bg-white/30 px-2.5 py-1 rounded-xl text-sky-100 tap-bounce"
+              type="button"
+              onClick={() => {
+                soundService.playClick();
+                setWalletSearchOpen((prev) => {
+                  const next = !prev;
+                  if (next) {
+                    setActiveTab('history');
+                    scrollToTabContent();
+                  } else {
+                    setWalletSearchQuery('');
+                  }
+                  return next;
+                });
+              }}
+              aria-label="Search transaction history"
+              className={`p-1.5 rounded-full transition-colors tap-bounce ${
+                walletSearchOpen ? 'bg-pink-100 text-[#ec0078]' : 'text-slate-900 hover:bg-pink-50'
+              }`}
             >
-              Admin Portal
+              <Search className="w-[22px] h-[22px]" strokeWidth={2.2} />
             </button>
-          )}
+
+            <button
+              type="button"
+              onClick={() => {
+                soundService.playClick();
+                onOpenNotifications?.();
+              }}
+              aria-label="Notifications"
+              className="relative p-1.5 rounded-full text-slate-900 hover:bg-pink-50 transition-colors tap-bounce"
+            >
+              <Bell className="w-[22px] h-[22px]" strokeWidth={2.2} />
+              {unreadNotificationCount > 0 && (
+                <span className="absolute top-0 right-0 min-w-[18px] h-[18px] px-1 rounded-full bg-red-500 text-white text-[10px] font-black leading-none flex items-center justify-center border-2 border-white tabular-nums">
+                  {unreadNotificationCount > 9 ? '9+' : unreadNotificationCount}
+                </span>
+              )}
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                soundService.playClick();
+                onOpenProfile?.();
+              }}
+              aria-label="User profile and settings"
+              className="w-9 h-9 rounded-full overflow-hidden ring-2 ring-pink-200 bg-gradient-to-br from-pink-100 to-rose-200 flex items-center justify-center shrink-0 tap-bounce"
+            >
+              {currentUser?.photoURL ? (
+                <img
+                  src={currentUser.photoURL}
+                  alt={currentUser.displayName || 'Profile'}
+                  className="w-full h-full object-cover"
+                />
+              ) : currentUser?.displayName ? (
+                <span className="text-sm font-extrabold text-[#ec0078]">
+                  {currentUser.displayName.charAt(0).toUpperCase()}
+                </span>
+              ) : (
+                <User className="w-5 h-5 text-[#ec0078]" />
+              )}
+            </button>
+          </div>
         </div>
 
-        {/* Main Balance Card: Points first, then Approved balance: $X.XX USD */}
-        <div className="mt-4 bg-white/15 backdrop-blur-md rounded-3xl p-4 border border-white/20 space-y-3">
-          <div className="flex items-center justify-between text-xs text-sky-100">
-            <span className="font-extrabold uppercase tracking-wider text-[10px]">
-              My Accumulated Balance
-            </span>
-            <span className="font-black bg-white/20 px-2 py-0.5 rounded-full text-white flex items-center gap-1">
-              <ShieldCheck className="w-3 h-3 text-emerald-300" />
-              <span>Verified Account</span>
-            </span>
+        {walletSearchOpen && (
+          <div className="px-4 pb-2.5">
+            <div className="flex items-center gap-2 bg-pink-50/90 border border-pink-200 rounded-full px-3.5 py-2">
+              <Search className="w-4 h-4 text-[#ec0078] shrink-0" />
+              <input
+                type="text"
+                autoFocus
+                value={walletSearchQuery}
+                onChange={(e) => setWalletSearchQuery(e.target.value)}
+                placeholder="Filter wallet history..."
+                className="flex-1 bg-transparent text-sm text-slate-900 placeholder:text-rose-400 focus:outline-none"
+              />
+              {walletSearchQuery && (
+                <button
+                  type="button"
+                  onClick={() => setWalletSearchQuery('')}
+                  className="p-0.5 rounded-full text-rose-500 hover:bg-pink-100"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              )}
+            </div>
           </div>
+        )}
+      </header>
 
-          <div className="flex items-baseline justify-between">
-            <div>
-              {/* Points first */}
-              <div className="text-3xl font-black text-white tracking-tight flex items-center">
-                <span>{points.toLocaleString()}</span>
-                <span className="text-xs text-sky-200 ml-1.5 font-bold">JoyPoints</span>
+      {/* MAIN CONTENT CONTAINER */}
+      <div className="px-4 space-y-4 pt-1">
+        {/* 2. LARGE PINK "MY WALLET" BALANCE CARD */}
+        <section className="relative overflow-hidden rounded-[26px] bg-gradient-to-br from-[#ff2a8d] via-[#ec0078] to-[#d9006c] p-5 text-white shadow-lg shadow-pink-200/80">
+          <div className="flex items-center justify-between gap-3">
+            {/* Left Decorative Pink Wallet & Star Coins Visual */}
+            <div className="relative shrink-0 w-24 h-24 flex items-center justify-center">
+              <div className="w-20 h-16 rounded-2xl bg-gradient-to-br from-pink-400 to-rose-600 border-2 border-pink-200/80 shadow-lg flex items-center justify-center relative">
+                <Wallet className="w-9 h-9 text-white drop-shadow-xs" />
+                <div className="absolute -top-3 left-3 w-8 h-8 rounded-full bg-gradient-to-br from-yellow-300 to-amber-500 border-2 border-yellow-100 shadow-md flex items-center justify-center">
+                  <Star className="w-4 h-4 text-white fill-white" />
+                </div>
+                <div className="absolute -bottom-2 -right-2 w-7 h-7 rounded-full bg-gradient-to-br from-yellow-300 to-amber-500 border-2 border-yellow-100 shadow-md flex items-center justify-center text-[10px]">
+                  ⭐
+                </div>
               </div>
-              {/* Approved balance */}
-              <div className="text-xs text-sky-100 font-bold mt-1 flex items-center gap-1.5 flex-wrap">
-                <span className="bg-white/20 px-2 py-0.5 rounded-md text-white font-extrabold">
-                  Approved balance: ${approvedBalanceUSD.toFixed(2)} USD
-                </span>
-                {canWithdraw ? (
-                  <span className="text-emerald-300 font-extrabold">• Ready to Withdraw</span>
-                ) : (
-                  <span className="text-amber-200 font-semibold">• Min $100.00 USD</span>
-                )}
-              </div>
-              {/* Notice for unpublished month with no dollar estimate */}
-              <p className="text-[10px] text-sky-200/90 font-medium mt-1">
-                {UNPUBLISHED_MONTH_NOTICE}
-              </p>
             </div>
 
+            {/* Right Balance Info */}
+            <div className="flex-1 min-w-0 space-y-1.5">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-[16px] font-extrabold text-white/95">
+                  {seniorMode ? 'میرا والیٹ' : 'My Wallet'}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    soundService.playClick();
+                    selection();
+                    setActiveTab('history');
+                    scrollToTabContent();
+                  }}
+                  aria-label="View wallet ledger"
+                  className="w-8 h-8 rounded-full bg-white/20 hover:bg-white/30 flex items-center justify-center tap-bounce shrink-0"
+                >
+                  <ChevronRight className="w-5 h-5 text-white" />
+                </button>
+              </div>
+
+              {/* Prominent USD Balance (from live JoyPoints conversion) */}
+              <div className="flex items-baseline gap-1.5 tabular-nums">
+                <span className="text-[36px] font-black leading-none tracking-tight">
+                  ${availablePointsUSD.toFixed(2)}
+                </span>
+                <span className="text-sm font-extrabold text-pink-100">USD</span>
+              </div>
+
+              {/* Permanent Lifetime JoyPoints Pill */}
+              <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-white/20 backdrop-blur-xs border border-white/25 text-xs font-extrabold">
+                <span>⭐</span>
+                <span className="tabular-nums">{points.toLocaleString()} JoyPoints</span>
+              </div>
+
+              {/* Clear Separation: Approved Withdrawable Cash */}
+              <p className="text-[11px] font-bold text-pink-100/95 pt-0.5">
+                Approved Cash: <span className="text-white font-black">${approvedBalanceUSD.toFixed(2)} USD</span>
+                {canWithdraw ? ' • Ready to Withdraw' : ` • Min $${MIN_WITHDRAW_USD} USD`}
+              </p>
+            </div>
+          </div>
+        </section>
+
+        {/* 3. FOUR COMPACT SOFT-PINK EARNINGS SUMMARY CARDS */}
+        <section className="grid grid-cols-4 gap-2">
+          {/* Card 1: Total Earning */}
+          <button
+            type="button"
+            onClick={() => {
+              soundService.playClick();
+              selection();
+              setActiveSummaryModal('total_earned');
+            }}
+            className="bg-[#fdf2f8] hover:bg-[#fce7f3] border border-pink-100 rounded-2xl px-1.5 py-3 flex flex-col items-center text-center gap-1.5 shadow-2xs tap-bounce"
+          >
+            <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-[#ff1b8d] to-[#d9006c] text-white flex items-center justify-center shadow-xs">
+              <Gift className="w-4 h-4" />
+            </div>
+            <span className="text-[10.5px] font-bold text-slate-700 leading-tight">
+              Total Earning
+            </span>
+            <span className="text-[13px] font-black text-[#ec0078] tabular-nums">
+              ${totalEarnedUSD.toFixed(2)}
+            </span>
+          </button>
+
+          {/* Card 2: This Week */}
+          <button
+            type="button"
+            onClick={() => {
+              soundService.playClick();
+              selection();
+              setActiveSummaryModal('today_points');
+            }}
+            className="bg-[#fdf2f8] hover:bg-[#fce7f3] border border-pink-100 rounded-2xl px-1.5 py-3 flex flex-col items-center text-center gap-1.5 shadow-2xs tap-bounce"
+          >
+            <div className="w-9 h-9 rounded-xl bg-white border border-pink-200 text-[#ec0078] flex items-center justify-center shadow-2xs">
+              <Calendar className="w-4 h-4" />
+            </div>
+            <span className="text-[10.5px] font-bold text-slate-700 leading-tight">
+              This Week
+            </span>
+            <span className="text-[13px] font-black text-[#ec0078] tabular-nums">
+              ${thisWeekUSD.toFixed(2)}
+            </span>
+          </button>
+
+          {/* Card 3: This Month */}
+          <button
+            type="button"
+            onClick={() => {
+              soundService.playClick();
+              selection();
+              setActiveSummaryModal('completed_tasks');
+            }}
+            className="bg-[#fdf2f8] hover:bg-[#fce7f3] border border-pink-100 rounded-2xl px-1.5 py-3 flex flex-col items-center text-center gap-1.5 shadow-2xs tap-bounce"
+          >
+            <div className="w-9 h-9 rounded-xl bg-white border border-pink-200 text-[#ec0078] flex items-center justify-center shadow-2xs">
+              <Sparkles className="w-4 h-4" />
+            </div>
+            <span className="text-[10.5px] font-bold text-slate-700 leading-tight">
+              This Month
+            </span>
+            <span className="text-[13px] font-black text-[#ec0078] tabular-nums">
+              ${thisMonthUSD.toFixed(2)}
+            </span>
+          </button>
+
+          {/* Card 4: Pending */}
+          <button
+            type="button"
+            onClick={() => {
+              soundService.playClick();
+              selection();
+              setActiveSummaryModal('pending_rewards');
+            }}
+            className="bg-[#fdf2f8] hover:bg-[#fce7f3] border border-pink-100 rounded-2xl px-1.5 py-3 flex flex-col items-center text-center gap-1.5 shadow-2xs tap-bounce"
+          >
+            <div className="w-9 h-9 rounded-xl bg-white border border-pink-200 text-[#ec0078] flex items-center justify-center shadow-2xs">
+              <History className="w-4 h-4" />
+            </div>
+            <span className="text-[10.5px] font-bold text-slate-700 leading-tight">
+              Pending
+            </span>
+            <span className="text-[13px] font-black text-[#ec0078] tabular-nums">
+              ${pendingWithdrawalsUSD.toFixed(2)}
+            </span>
+          </button>
+        </section>
+
+        {/* 4. WITHDRAW YOUR EARNINGS SECTION (EasyPaisa, JazzCash, Bank + View History) */}
+        <section className="space-y-2.5">
+          <div className="flex items-center justify-between px-0.5">
+            <div className="flex items-center gap-2">
+              <span className="w-1.5 h-4 rounded-full bg-[#ec0078]" />
+              <h2 className="font-extrabold text-slate-900 text-[15px]">
+                {seniorMode ? 'اپنی کمائی نکلوائیں' : 'Withdraw Your Earnings'}
+              </h2>
+            </div>
             <button
+              type="button"
               onClick={() => {
                 soundService.playClick();
                 selection();
-                setActiveTab('withdraw');
+                setActiveTab('history');
+                scrollToTabContent();
               }}
-              className="px-4 py-2 bg-white text-sky-700 hover:bg-sky-50 rounded-2xl font-black text-xs tap-bounce shadow-md flex items-center gap-1.5 shrink-0"
+              className="text-xs font-extrabold text-[#ec0078] hover:text-[#be0060] flex items-center gap-0.5 tap-bounce"
             >
-              <ArrowDownToLine className="w-3.5 h-3.5" />
-              <span>Withdraw</span>
+              <span>{seniorMode ? 'ہسٹری دیکھیں' : 'View History'}</span>
+              <ChevronRight className="w-3.5 h-3.5" />
             </button>
           </div>
-        </div>
-      </div>
 
-      {/* 4-Stat Metric Summary Grid */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 p-3">
-        {/* Card 1: Total Earned */}
+          <div className="bg-[#fdf2f8] border border-pink-100 rounded-[24px] p-4 space-y-3.5 shadow-2xs">
+            <div className="flex items-center justify-between gap-2.5 flex-wrap sm:flex-nowrap">
+              <div className="min-w-[110px]">
+                <p className="text-xs font-extrabold text-slate-900 leading-tight">
+                  Choose Payment Method:
+                </p>
+                <p className="text-[11px] text-slate-600 mt-0.5">
+                  EasyPaisa, JazzCash or Bank
+                </p>
+              </div>
+
+              <div className="grid grid-cols-3 gap-2 flex-1">
+                <button
+                  type="button"
+                  onClick={() => {
+                    soundService.playClick();
+                    setWithdrawalMethod('Easypaisa');
+                  }}
+                  className={`py-2 px-2 rounded-xl border text-center transition-all tap-bounce flex flex-col items-center justify-center gap-0.5 ${
+                    withdrawalMethod === 'Easypaisa'
+                      ? 'bg-white border-[#ec0078] ring-2 ring-pink-200 shadow-xs'
+                      : 'bg-white/90 border-pink-100 hover:border-pink-300'
+                  }`}
+                >
+                  <span className="text-sm font-black text-emerald-600 leading-none">e</span>
+                  <span className="text-[10px] font-extrabold text-slate-800">easypaisa</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    soundService.playClick();
+                    setWithdrawalMethod('JazzCash');
+                  }}
+                  className={`py-2 px-2 rounded-xl border text-center transition-all tap-bounce flex flex-col items-center justify-center gap-0.5 ${
+                    withdrawalMethod === 'JazzCash'
+                      ? 'bg-slate-950 border-[#ec0078] ring-2 ring-pink-200 shadow-xs'
+                      : 'bg-slate-900 border-slate-800 hover:border-pink-300'
+                  }`}
+                >
+                  <span className="text-[10.5px] font-black text-amber-400 leading-tight">JazzCash</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    soundService.playClick();
+                    setWithdrawalMethod('Bank');
+                  }}
+                  className={`py-2 px-2 rounded-xl border text-center transition-all tap-bounce flex flex-col items-center justify-center gap-0.5 ${
+                    withdrawalMethod === 'Bank'
+                      ? 'bg-white border-[#ec0078] ring-2 ring-pink-200 shadow-xs'
+                      : 'bg-white/90 border-pink-100 hover:border-pink-300'
+                  }`}
+                >
+                  <Building2 className="w-4 h-4 text-slate-800" />
+                  <span className="text-[10px] font-extrabold text-slate-800">Bank</span>
+                </button>
+              </div>
+            </div>
+
+            <button
+              type="button"
+              disabled={!canWithdraw}
+              onClick={() => {
+                if (!canWithdraw) return;
+                soundService.playClick();
+                selection();
+                setActiveTab('withdraw');
+                scrollToTabContent();
+              }}
+              className={`w-full py-3 rounded-full font-black text-sm flex items-center justify-center gap-2 transition-all ${
+                canWithdraw
+                  ? 'bg-gradient-to-r from-[#ff1b8d] to-[#d9006c] hover:brightness-105 text-white shadow-md shadow-pink-200/80 tap-bounce cursor-pointer'
+                  : 'bg-pink-200/80 text-pink-500 cursor-not-allowed'
+              }`}
+            >
+              <Wallet className="w-4 h-4" />
+              <span>
+                {canWithdraw
+                  ? seniorMode
+                    ? 'ابھی نکلوائیں'
+                    : 'Withdraw Now'
+                  : seniorMode
+                  ? `کم از کم $${MIN_WITHDRAW_USD} درکار ہے`
+                  : `Withdraw Now ($${MIN_WITHDRAW_USD} Min Required)`}
+              </span>
+            </button>
+            <p className="text-[10.5px] text-slate-600 text-center font-semibold">
+              {canWithdraw
+                ? 'EasyPaisa, JazzCash & Bank payouts require admin verification before payment.'
+                : `Withdrawals unlock at $${MIN_WITHDRAW_USD}.00 approved balance (${activePointsPerDollar.toLocaleString()} Pts = $1.00 USD) and require admin verification.`}
+            </p>
+          </div>
+        </section>
+
+        {/* 5. KEEP EARNING PROMO BANNER */}
         <div
           onClick={() => {
             soundService.playClick();
-            selection();
-            setActiveSummaryModal('total_earned');
+            onOpenTasks?.();
           }}
-          className="bg-white p-3 rounded-2xl border border-slate-200/90 hover:border-sky-300 transition-all cursor-pointer tap-bounce shadow-2xs group relative overflow-hidden"
-          title="Tap to view Lifetime Points Breakdown"
+          className="rounded-[24px] bg-gradient-to-r from-[#d9006c] via-[#ec0078] to-[#a855f7] px-4 py-3.5 text-white shadow-md shadow-pink-200/70 cursor-pointer tap-bounce flex items-center justify-between gap-3"
         >
-          <div className="flex items-center justify-between">
-            <span className="text-[10px] font-black uppercase tracking-wider text-slate-400 block truncate">
-              Total Points
-            </span>
-            <ChevronRight className="w-3 h-3 text-slate-300 group-hover:text-sky-600 transition-colors" />
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-yellow-300 to-amber-500 flex items-center justify-center shrink-0 shadow-sm">
+              <Trophy className="w-7 h-7 text-white drop-shadow-xs" />
+            </div>
+            <div className="min-w-0">
+              <h3 className="text-[17px] font-black italic leading-tight truncate">
+                {seniorMode ? 'کمائی جاری رکھیں!' : 'Keep Earning!'}
+              </h3>
+              <p className="text-[12px] font-extrabold italic text-[#fde047] truncate">
+                {seniorMode ? 'مزید ٹاسک = مزید انعامات' : 'More Tasks = More Rewards'}
+              </p>
+            </div>
           </div>
-          <div className="text-sm font-black text-slate-900 mt-0.5">
-            {totalJoyPointsEarned.toLocaleString()} Pts
-          </div>
-          <span className="text-[10px] text-slate-500 font-semibold block truncate">
-            Lifetime Verified • View ↗
-          </span>
-        </div>
 
-        {/* Card 2: Today's Points */}
-        <div
-          onClick={() => {
-            soundService.playClick();
-            selection();
-            setActiveSummaryModal('today_points');
-          }}
-          className="bg-white p-3 rounded-2xl border border-slate-200/90 hover:border-sky-300 transition-all cursor-pointer tap-bounce shadow-2xs group relative overflow-hidden"
-          title="Tap to view Today's Points Breakdown"
-        >
-          <div className="flex items-center justify-between">
-            <span className="text-[10px] font-black uppercase tracking-wider text-slate-400 block truncate">
-              Today's Points
-            </span>
-            <ChevronRight className="w-3 h-3 text-slate-300 group-hover:text-sky-600 transition-colors" />
-          </div>
-          <div className="text-sm font-black text-sky-600 mt-0.5">
-            +{todayPoints.toLocaleString()}
-          </div>
-          <span className="text-[10px] text-slate-500 font-semibold block truncate">
-            Cap: {DAILY_MAX_POINTS} Pts • View ↗
-          </span>
-        </div>
-
-        {/* Card 3: Pending Requests */}
-        <div
-          onClick={() => {
-            soundService.playClick();
-            selection();
-            setActiveSummaryModal('pending_rewards');
-          }}
-          className="bg-white p-3 rounded-2xl border border-slate-200/90 hover:border-amber-300 transition-all cursor-pointer tap-bounce shadow-2xs group relative overflow-hidden"
-          title="Tap to view Pending Requests"
-        >
-          <div className="flex items-center justify-between">
-            <span className="text-[10px] font-black uppercase tracking-wider text-slate-400 block truncate">
-              Pending Requests
-            </span>
-            <ChevronRight className="w-3 h-3 text-slate-300 group-hover:text-amber-600 transition-colors" />
-          </div>
-          <div className="text-sm font-black text-amber-600 mt-0.5">
-            {pendingRequestsCount} Pending
-          </div>
-          <span className="text-[10px] text-slate-500 font-semibold block truncate">
-            {PAYOUT_REVIEW_TEXT} • View ↗
-          </span>
-        </div>
-
-        {/* Card 4: Completed Tasks */}
-        <div
-          onClick={() => {
-            soundService.playClick();
-            selection();
-            setActiveSummaryModal('completed_tasks');
-          }}
-          className="bg-white p-3 rounded-2xl border border-slate-200/90 hover:border-emerald-300 transition-all cursor-pointer tap-bounce shadow-2xs group relative overflow-hidden"
-          title="Tap to view Verified Completed Tasks History"
-        >
-          <div className="flex items-center justify-between">
-            <span className="text-[10px] font-black uppercase tracking-wider text-slate-400 block truncate">
-              Completed Tasks
-            </span>
-            <ChevronRight className="w-3 h-3 text-slate-300 group-hover:text-emerald-600 transition-colors" />
-          </div>
-          <div className="text-sm font-black text-emerald-600 mt-0.5">
-            {completedTasksCount} Verified
-          </div>
-          <span className="text-[10px] text-slate-500 font-semibold block truncate">
-            100% Genuine • View ↗
+          <span className="px-4 py-2 rounded-full bg-white text-[#9d174d] font-black text-xs inline-flex items-center gap-1 shrink-0 shadow-sm">
+            <span>{seniorMode ? 'ٹاسک شروع' : 'Start Tasks'}</span>
+            <Play className="w-3 h-3 fill-[#ec0078] text-[#ec0078]" />
           </span>
         </div>
       </div>
 
       {/* Tabs Switcher: Overview | Withdraw | Ledger */}
-      <div className="px-3 flex gap-1.5 border-b border-slate-200 pb-2">
+      <div ref={tabContentRef} className="px-4 pt-4 flex gap-2 border-b border-pink-100 pb-2.5">
         <button
           onClick={() => {
             soundService.playClick();
             selection();
             setActiveTab('overview');
           }}
-          className={`flex-1 py-2 rounded-xl text-xs font-black transition-all tap-bounce ${
+          className={`flex-1 py-2 rounded-full text-xs font-extrabold transition-all tap-bounce ${
             activeTab === 'overview'
-              ? 'bg-sky-600 text-white shadow-xs'
-              : 'bg-white text-slate-600 hover:bg-slate-100 border border-slate-200/80'
+              ? 'bg-[#ec0078] text-white shadow-xs'
+              : 'bg-[#fce7f3] text-[#831843] hover:bg-[#fbcfe8]'
           }`}
         >
-          Overview & Boosts
+          Overview
         </button>
 
         <button
@@ -796,13 +1087,13 @@ export const WalletPage: React.FC<WalletPageProps> = ({
             selection();
             setActiveTab('withdraw');
           }}
-          className={`flex-1 py-2 rounded-xl text-xs font-black transition-all tap-bounce ${
+          className={`flex-1 py-2 rounded-full text-xs font-extrabold transition-all tap-bounce ${
             activeTab === 'withdraw'
-              ? 'bg-sky-600 text-white shadow-xs'
-              : 'bg-white text-slate-600 hover:bg-slate-100 border border-slate-200/80'
+              ? 'bg-[#ec0078] text-white shadow-xs'
+              : 'bg-[#fce7f3] text-[#831843] hover:bg-[#fbcfe8]'
           }`}
         >
-          Withdraw ($100 Min)
+          Withdraw
         </button>
 
         <button
@@ -811,13 +1102,13 @@ export const WalletPage: React.FC<WalletPageProps> = ({
             selection();
             setActiveTab('history');
           }}
-          className={`flex-1 py-2 rounded-xl text-xs font-black transition-all tap-bounce ${
+          className={`flex-1 py-2 rounded-full text-xs font-extrabold transition-all tap-bounce ${
             activeTab === 'history'
-              ? 'bg-sky-600 text-white shadow-xs'
-              : 'bg-white text-slate-600 hover:bg-slate-100 border border-slate-200/80'
+              ? 'bg-[#ec0078] text-white shadow-xs'
+              : 'bg-[#fce7f3] text-[#831843] hover:bg-[#fbcfe8]'
           }`}
         >
-          Ledger ({transactions.length})
+          History ({transactions.length + userWithdrawals.length})
         </button>
       </div>
 
@@ -842,50 +1133,17 @@ export const WalletPage: React.FC<WalletPageProps> = ({
       {/* TAB 1: OVERVIEW & BOOSTS */}
       {activeTab === 'overview' && (
         <div className="p-3 space-y-3 animate-fadeIn">
-          {/* Daily Rewarded Video Boost Card */}
-          <div className="bg-gradient-to-br from-indigo-500 via-purple-500 to-pink-500 rounded-3xl p-4 text-white shadow-md relative overflow-hidden">
-            <div className="flex items-center justify-between">
-              <div>
-                <span className="text-[10px] font-black uppercase tracking-wider bg-white/20 px-2 py-0.5 rounded-full">
-                  Instant Points Boost
-                </span>
-                <h3 className="text-base font-black mt-1">Watch Family Partner Ad</h3>
-                <p className="text-xs text-purple-100 mt-0.5">
-                  Earn +50 genuine JoyPoints instantly • 1 min cooldown
-                </p>
-              </div>
-
-              <div className="w-12 h-12 rounded-2xl bg-white/20 flex items-center justify-center text-2xl shadow-inner">
-                📺
-              </div>
+          {/* Policy & Ad Separation Notice (AdMob kept strictly separate from cash-convertible rewards) */}
+          <div className="bg-[#fdf2f8] rounded-3xl p-4 border border-pink-100 space-y-1.5">
+            <div className="flex items-center gap-2">
+              <ShieldCheck className="w-4 h-4 text-[#ec0078] shrink-0" />
+              <h3 className="text-xs font-black text-slate-900 uppercase tracking-wide">
+                Verified Rewards &amp; Payout Policy
+              </h3>
             </div>
-
-            <div className="mt-4 flex items-center justify-between pt-2 border-t border-white/20">
-              <span className="text-xs font-black text-amber-200">+50 JoyPoints</span>
-
-              {simulatedAdPlaying ? (
-                <div className="px-4 py-2 bg-white text-indigo-700 rounded-xl text-xs font-black flex items-center gap-1.5">
-                  <Clock className="w-3.5 h-3.5 animate-spin" />
-                  <span>Viewing Partner Ad ({simulatedAdSeconds}s)</span>
-                </div>
-              ) : cooldownRemaining > 0 ? (
-                <button
-                  disabled
-                  className="px-4 py-2 bg-white/30 text-white/80 rounded-xl text-xs font-black cursor-not-allowed flex items-center gap-1"
-                >
-                  <Clock className="w-3.5 h-3.5" />
-                  <span>Cooldown ({cooldownRemaining}s)</span>
-                </button>
-              ) : (
-                <button
-                  onClick={handleWatchRewardedAd}
-                  className="px-4 py-2 bg-white text-indigo-700 hover:bg-indigo-50 rounded-xl text-xs font-black tap-bounce shadow flex items-center gap-1"
-                >
-                  <Play className="w-3.5 h-3.5 fill-indigo-700" />
-                  <span>Watch & Claim (+50)</span>
-                </button>
-              )}
-            </div>
+            <p className="text-[11px] text-slate-600 leading-relaxed">
+              Active conversion rate: <strong className="text-[#ec0078]">{activePointsPerDollar.toLocaleString()} JoyPoints = $1.00 USD</strong> (configurable between 8,000–10,000 Pts/$1). Minimum withdrawal is strictly <strong>${MIN_WITHDRAW_USD}.00 USD</strong>, and all EasyPaisa, JazzCash, and Bank details require manual admin verification before payment. AdMob advertising is strictly separate from cash-convertible rewards.
+            </p>
           </div>
 
           {/* Quick Withdrawal Jump Banner with Minimum withdrawal: $100 & Progress bar */}
@@ -1608,7 +1866,7 @@ export const WalletPage: React.FC<WalletPageProps> = ({
                       {/* Contact support button */}
                       <div className="pt-1 flex justify-end">
                         <a
-                          href={`mailto:fatimakiduniya362@gmail.com?subject=JoyEarn Withdrawal Inquiry - ${w.id}&body=Hello JoyEarn Support,%0D%0A%0D%0AMy withdrawal request ID is: ${w.id}%0D%0AAccount Title: ${w.accountName || ''}%0D%0APayout Method: ${w.paymentMethod || ''}%0D%0ANet Amount: $${net.toFixed(2)} USD%0D%0A%0D%0APlease assist with my request.`}
+                          href={`mailto:romeelajutt23@gmail.com?subject=JoyEarn Withdrawal Inquiry - ${w.id}&body=Hello JoyEarn Support,%0D%0A%0D%0AMy withdrawal request ID is: ${w.id}%0D%0AAccount Title: ${w.accountName || ''}%0D%0APayout Method: ${w.paymentMethod || ''}%0D%0ANet Amount: $${net.toFixed(2)} USD%0D%0A%0D%0APlease assist with my request.`}
                           className="text-[10px] font-bold text-sky-600 hover:text-sky-800 hover:underline tap-bounce"
                         >
                           Contact support about this request ✉
@@ -1629,7 +1887,9 @@ export const WalletPage: React.FC<WalletPageProps> = ({
                   Verified Activity Ledger
                 </h3>
                 <p className="text-[10px] text-slate-500 font-semibold">
-                  {transactions.length} Records
+                  {walletSearchQuery.trim()
+                    ? `${filteredTransactions.length} of ${transactions.length} Records`
+                    : `${transactions.length} Records`}
                 </p>
               </div>
 
@@ -1648,17 +1908,21 @@ export const WalletPage: React.FC<WalletPageProps> = ({
               </button>
             </div>
 
-            {transactions.length === 0 ? (
+            {filteredTransactions.length === 0 ? (
               <div className="bg-white rounded-3xl p-8 text-center border border-slate-200 space-y-2">
                 <div className="text-3xl">📝</div>
-                <h4 className="font-bold text-slate-700 text-xs">No transactions yet</h4>
+                <h4 className="font-bold text-slate-700 text-xs">
+                  {walletSearchQuery.trim() ? 'No matching transactions' : 'No transactions yet'}
+                </h4>
                 <p className="text-[11px] text-slate-400">
-                  Complete daily quizzes, watch tutorials, or check in to start accumulating verified JoyPoints.
+                  {walletSearchQuery.trim()
+                    ? `No ledger entries matched "${walletSearchQuery.trim()}".`
+                    : 'Complete daily quizzes, watch tutorials, or check in to start accumulating verified JoyPoints.'}
                 </p>
               </div>
             ) : (
               <div className="space-y-2">
-                {transactions.map((tx) => {
+                {filteredTransactions.map((tx) => {
                   const isPositive = tx.points >= 0;
                   return (
                     <div

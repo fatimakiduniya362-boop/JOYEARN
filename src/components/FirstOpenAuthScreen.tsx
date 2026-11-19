@@ -64,17 +64,14 @@ export const FirstOpenAuthScreen: React.FC<FirstOpenAuthScreenProps> = ({
           localStorage.setItem('joyearn_user_email', result.user.email);
         }
 
-        // Preserve existing Firestore new-user / existing-user recognition
-        let welcomeBonus = 0;
+        // Preserve existing Firestore new-user / existing-user recognition; new users start at 0 Points & $0.00
+        const welcomeBonus = 0;
         try {
-          const bonusClaimResult = await claimWelcomeBonusInFirestore(
+          await claimWelcomeBonusInFirestore(
             result.user.uid,
             result.user.email,
             result.user.displayName
           );
-          if (!bonusClaimResult.alreadyClaimed) {
-            welcomeBonus = 50;
-          }
         } catch {
           // Do not block sign-in if Firestore check is offline
         }
@@ -105,8 +102,8 @@ export const FirstOpenAuthScreen: React.FC<FirstOpenAuthScreenProps> = ({
       } else if (err.code === 'auth/network-request-failed') {
         setErrorMessage(
           seniorMode
-            ? 'انٹرنیٹ کنکشن کا مسئلہ ہے۔ براہ کرم دوبارہ کوشش کریں۔'
-            : 'Network connection issue. Please check your internet connection and try again.'
+            ? 'آپ آف لائن ہیں۔ محفوظ شدہ مواد استعمال کرنے کے لیے نیچے سائن ان کریں۔'
+            : 'You are offline, showing saved content. Use Sign In below to continue offline.'
         );
       } else {
         setErrorMessage(err.message || 'Unable to sign in with Google. Please try again.');

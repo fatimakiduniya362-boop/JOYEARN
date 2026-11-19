@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { X, ShieldCheck, Sparkles, Megaphone } from 'lucide-react';
+import { X, Megaphone } from 'lucide-react';
 import { ADMOB_CONFIG, adMobManager } from '../services/adMobService';
 import { soundService } from '../services/soundService';
 
@@ -22,6 +22,20 @@ export const AdMobInterstitialModal: React.FC<AdMobInterstitialModalProps> = ({
     if (!isOpen) return;
 
     adMobManager.setIsAdShowing(true);
+    adMobManager.recordAdRequest('interstitial');
+    const sdkStatus = adMobManager.getSdkStatus();
+    if (sdkStatus === 'offline') {
+      adMobManager.recordAdError('interstitial', 'LOAD_ERROR', 'Device offline — ad request could not reach AdMob.');
+    } else if (sdkStatus === 'native_bridge_ready' || sdkStatus === 'web_adsense_ready') {
+      adMobManager.recordAdMatched('interstitial');
+    } else {
+      adMobManager.recordAdError(
+        'interstitial',
+        'NO_FILL',
+        'Web preview active — native Android AdMob SDK not attached.'
+      );
+    }
+
     setCountdown(5);
     setCanClose(false);
 
@@ -45,7 +59,10 @@ export const AdMobInterstitialModal: React.FC<AdMobInterstitialModalProps> = ({
   const handleDismiss = () => {
     if (!canClose) return;
     soundService.playClick();
-    adMobManager.recordInterstitialShown();
+    const sdkStatus = adMobManager.getSdkStatus();
+    if (sdkStatus === 'native_bridge_ready' || sdkStatus === 'web_adsense_ready') {
+      adMobManager.recordInterstitialShown();
+    }
     adMobManager.setIsAdShowing(false);
     onClose();
   };

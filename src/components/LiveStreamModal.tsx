@@ -45,13 +45,12 @@ const INAPPROPRIATE_KEYWORDS = [
 export const LiveStreamModal: React.FC<LiveStreamModalProps> = ({
   isOpen,
   onClose,
-  userPoints = 1250,
+  userPoints = 0,
   onSpendPoints,
   seniorMode = false
 }) => {
   // Real values: 0 starting likes and 1 viewer (current active user) - zero fake data
   const [likes, setLikes] = useState(0);
-  const [isMicOn, setIsMicOn] = useState(true);
   const [commentText, setCommentText] = useState('');
   const [comments, setComments] = useState<StreamComment[]>([]);
   const [flyingHearts, setFlyingHearts] = useState<{ id: number; left: number }[]>([]);
@@ -110,9 +109,9 @@ export const LiveStreamModal: React.FC<LiveStreamModalProps> = ({
   const handleSendGift = (giftName: string, cost: number, icon: string) => {
     if (userPoints < cost) {
       soundService.playWrong();
-      try {
-        alert(`You need ${cost} JoyPoints to send this gift!`);
-      } catch {}
+      warning();
+      setFilterWarning(`You need ${cost} JoyPoints to send this gift!`);
+      setTimeout(() => setFilterWarning(null), 3500);
       return;
     }
     if (onSpendPoints) onSpendPoints(cost);
@@ -155,13 +154,6 @@ export const LiveStreamModal: React.FC<LiveStreamModalProps> = ({
             </div>
 
             <div className="flex items-center gap-1.5">
-              <button
-                onClick={() => setIsMicOn(!isMicOn)}
-                className="w-8 h-8 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center text-xs text-white"
-                title={isMicOn ? 'Mute' : 'Unmute'}
-              >
-                {isMicOn ? <Mic className="w-4 h-4 text-emerald-400" /> : <MicOff className="w-4 h-4 text-rose-400" />}
-              </button>
               <button
                 onClick={onClose}
                 className="w-8 h-8 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center text-xs text-white"

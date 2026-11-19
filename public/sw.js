@@ -1,5 +1,5 @@
 // JoyEarn Offline Service Worker
-const CACHE_NAME = 'joyearn-cache-v1';
+const CACHE_NAME = 'joyearn-cache-v2';
 const PRECACHE_ASSETS = [
   '/',
   '/index.html',
@@ -38,7 +38,7 @@ self.addEventListener('fetch', (event) => {
   if (event.request.method !== 'GET') return;
 
   const url = new URL(event.request.url);
-  // Never intercept or cache authentication, Firebase Auth, Google APIs, or token requests
+  // Never intercept or cache authentication, Firebase Auth, Google APIs, Vite dev modules, or token requests
   if (
     url.hostname.includes('firebase') ||
     url.hostname.includes('identitytoolkit') ||
@@ -46,11 +46,48 @@ self.addEventListener('fetch', (event) => {
     url.hostname.includes('accounts.google.com') ||
     url.hostname.includes('firestore.googleapis.com') ||
     url.pathname.includes('/auth') ||
-    url.pathname.includes('/api/auth')
+    url.pathname.includes('/api/auth') ||
+    url.pathname.startsWith('/@vite') ||
+    url.pathname.startsWith('/src/') ||
+    url.pathname.startsWith('/node_modules/')
   ) {
     return; // Pass through directly to network
   }
 
+  // Network-first for HTML navigation, JS, and CSS so UI updates are always visible immediately,
+  // while falling back to the cached shell when the device is offline.
+  const isAppShellAsset =
+    event.request.mode === 'navigate' ||
+    url.pathname === '/' ||
+    url.pathname.endsWith('.html') ||
+    url.pathname.endsWith('.js') ||
+    url.pathname.endsWith('.css');
+
+  if (isAppShellAsset) {
+    event.respondWith(
+      fetch(event.request)
+        .then((networkResponse) => {
+          if (networkResponse && networkResponse.status === 200 && networkResponse.type === 'basic') {
+            const responseToCache = networkResponse.clone();
+            caches.open(CACHE_NAME).then((cache) => {
+              cache.put(event.request, responseToCache);
+            });
+          }
+          return networkResponse;
+        })
+        .catch(() => {
+          return caches.match(event.request).then((cachedResponse) => {
+            if (cachedResponse) return cachedResponse;
+            if (event.request.mode === 'navigate') {
+              return caches.match('/index.html');
+            }
+          });
+        })
+    );
+    return;
+  }
+
+  // Cache-first for static images/icons with network fallback
   event.respondWith(
     caches.match(event.request).then((cachedResponse) => {
       if (cachedResponse) {
@@ -65,11 +102,6 @@ self.addEventListener('fetch', (event) => {
           cache.put(event.request, responseToCache);
         });
         return networkResponse;
-      }).catch(() => {
-        // Fallback for navigation requests
-        if (event.request.mode === 'navigate') {
-          return caches.match('/index.html');
-        }
       });
     })
   );

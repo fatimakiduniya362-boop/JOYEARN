@@ -118,6 +118,19 @@ export function generateProceduralQuestions(dateStr: string, count: number = 2):
   return items;
 }
 
+export function normalizeQuizDifficulty(diff?: string): 'Beginner' | 'Intermediate' | 'Advanced' {
+  const normalized = (diff || 'beginner').trim().toLowerCase();
+  if (normalized === 'intermediate' || normalized === 'medium') return 'Intermediate';
+  if (normalized === 'advanced' || normalized === 'hard') return 'Advanced';
+  return 'Beginner';
+}
+
+export function getCorrectOptionIndex(quiz: Pick<QuizItem, 'correctIndex' | 'correctAnswer'>): number {
+  if (typeof quiz.correctAnswer === 'number') return quiz.correctAnswer;
+  if (typeof quiz.correctIndex === 'number') return quiz.correctIndex;
+  return 0;
+}
+
 export interface ShuffledQuizItem extends QuizItem {
   originalCorrectAnswerIndex: number;
 }
@@ -138,11 +151,13 @@ export function shuffleQuizOptions(quiz: QuizItem, randomSeed?: number): Shuffle
   const shuffledOptions = indices.map((idx) => quiz.options[idx]);
   const correctVal = quiz.correctAnswer !== undefined ? quiz.correctAnswer : (quiz.correctIndex ?? 0);
   const newCorrectAnswer = indices.indexOf(correctVal);
+  const resolvedCorrect = newCorrectAnswer >= 0 ? newCorrectAnswer : 0;
 
   return {
     ...quiz,
     options: shuffledOptions,
-    correctAnswer: newCorrectAnswer >= 0 ? newCorrectAnswer : 0,
+    correctAnswer: resolvedCorrect,
+    correctIndex: resolvedCorrect,
     originalCorrectAnswerIndex: correctVal
   };
 }
